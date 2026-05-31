@@ -30,6 +30,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self writeBrowserStateRunning:YES];
     [self startMemoryPressureMonitor];
 
+    NSArray<NSString *> *urlArgs = [self launchURLArguments];
+    if (urlArgs.count > 0) {
+        for (NSUInteger i = 0; i < urlArgs.count; i++) {
+            [self newTabWithURLString:urlArgs[i] select:(i == urlArgs.count - 1)];
+        }
+        return;
+    }
+
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     BOOL onboarded = [defaults boolForKey:@"TBHasOnboarded"];
     if (!onboarded) {
@@ -38,6 +46,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     } else {
         [self newTabWithURLString:[self homeURLString] select:YES];
     }
+}
+
+- (NSArray<NSString *> *)launchURLArguments {
+    NSMutableArray<NSString *> *urls = [NSMutableArray array];
+    for (NSString *arg in [NSProcessInfo processInfo].arguments) {
+        if ([arg hasPrefix:@"http://"] || [arg hasPrefix:@"https://"]) [urls addObject:arg];
+    }
+    return urls;
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
