@@ -203,26 +203,83 @@ const BrowserChrome: React.FC<{
   );
 };
 
+/* ── brand mark (the official TrailBrowser logo, animated) ──────────────── */
+const TRAIL_D = "M170 392 C250 378 298 330 286 286 C276 246 200 240 192 200 C186 166 248 156 342 132";
+
+const Waypoint: React.FC<{ x: number; y: number; r: number; ring?: boolean; popDelay: number; gid: string; animated: boolean }> = ({ x, y, r, ring, popDelay, gid, animated }) => {
+  const spr = Math.min(1, useSpr(popDelay, POP));
+  const s = animated ? spr : 1;
+  if (s <= 0.001) return null;
+  const common = { style: { transformBox: "fill-box" as const, transformOrigin: "center", transform: `scale(${s})` } };
+  return ring
+    ? <circle cx={x} cy={y} r={r} fill="#0a0a0b" stroke={`url(#${gid})`} strokeWidth={9} {...common} />
+    : <circle cx={x} cy={y} r={r} fill="#f76b1c" {...common} />;
+};
+
+const TrailMark: React.FC<{ size?: number; tile?: boolean; drawDelay?: number; drawDur?: number; uid?: string; animated?: boolean }> = ({ size = 240, tile = true, drawDelay = 6, drawDur = 32, uid = "m", animated = true }) => {
+  const frame = useCurrentFrame();
+  const p = animated ? ci(frame, [drawDelay, drawDelay + drawDur], [0, 1]) : 1;
+  const summitSpr = Math.min(1, useSpr(drawDelay + drawDur, POP));
+  const summit = animated ? summitSpr : 1;
+  const tid = `tb-trail-${uid}`, sid = `tb-summit-${uid}`, gid = `tb-glow-${uid}`, bid = `tb-tile-${uid}`;
+  const dot = { transformBox: "fill-box" as const, transformOrigin: "center", transform: `scale(${summit})` };
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" style={{ overflow: "visible" }}>
+      <defs>
+        <linearGradient id={bid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1e1e24" /><stop offset="1" stopColor="#0a0a0b" />
+        </linearGradient>
+        <linearGradient id={tid} x1="0.1" y1="1" x2="0.9" y2="0">
+          <stop offset="0" stopColor="#ffb066" /><stop offset="1" stopColor="#f76b1c" />
+        </linearGradient>
+        <radialGradient id={sid} cx="0.5" cy="0.4" r="0.6">
+          <stop offset="0" stopColor="#ffd9b0" /><stop offset="0.55" stopColor="#f76b1c" /><stop offset="1" stopColor="#f76b1c" />
+        </radialGradient>
+        <filter id={gid} x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="10" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+      {tile ? (
+        <>
+          <rect x="16" y="16" width="480" height="480" rx="108" fill={`url(#${bid})`} />
+          <rect x="16.5" y="16.5" width="479" height="479" rx="107.5" fill="none" stroke="rgba(255,255,255,0.09)" />
+          <rect x="16" y="16" width="480" height="240" rx="108" fill="white" opacity="0.04" />
+        </>
+      ) : null}
+      <path d={TRAIL_D} fill="none" stroke="#f76b1c" strokeWidth={26} strokeLinecap="round" opacity={0.35} filter={`url(#${gid})`} pathLength={1} strokeDasharray={1} strokeDashoffset={1 - p} />
+      <path d={TRAIL_D} fill="none" stroke={`url(#${tid})`} strokeWidth={26} strokeLinecap="round" strokeLinejoin="round" pathLength={1} strokeDasharray={1} strokeDashoffset={1 - p} />
+      <Waypoint x={170} y={392} r={15} ring popDelay={drawDelay} gid={tid} animated={animated} />
+      <Waypoint x={286} y={286} r={13} popDelay={drawDelay + drawDur * 0.46} gid={tid} animated={animated} />
+      <Waypoint x={192} y={200} r={13} popDelay={drawDelay + drawDur * 0.72} gid={tid} animated={animated} />
+      <circle cx={342} cy={132} r={34} fill="#f76b1c" opacity={0.18 + 0.22 * pulse(frame, 9)} filter={`url(#${gid})`} style={dot} />
+      <circle cx={342} cy={132} r={22} fill={`url(#${sid})`} style={dot} />
+    </svg>
+  );
+};
+
 /* ── 1. intro ───────────────────────────────────────────────────────────── */
 const IntroScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const trail = useSpr(6, SNAP);
   const lift = floaty(frame, 5, 26);
+  const bar = useSpr(34, SNAP);
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
       <Backdrop glowY={42} />
-      <div style={{ textAlign: "center", transform: `translateY(${lift}px)` }}>
-        <Pop from={0.7}>
-          <div style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 138, letterSpacing: -4, color: palette.text }}>
-            Trail<span style={{ color: palette.accent }}>Browser</span>
-          </div>
-        </Pop>
-        <div style={{ height: 5, width: 580, margin: "10px auto 0", borderRadius: 3, background: palette.accent, transform: `scaleX(${trail})`, transformOrigin: "center", boxShadow: `0 0 ${18 + pulse(frame, 9) * 14}px ${palette.accentGlow}` }} />
-        <Rise delay={14}>
-          <div style={{ marginTop: 32, fontFamily: monoFont, fontSize: 26, color: palette.textDim, letterSpacing: 1 }}>
-            A simple native browser — light on memory, with AI built in.
-          </div>
-        </Rise>
+      <div style={{ display: "flex", alignItems: "center", gap: 46, transform: `translateY(${lift}px)` }}>
+        <Pop from={0.7}><TrailMark size={236} tile drawDelay={8} drawDur={34} uid="intro" /></Pop>
+        <div>
+          <SlideIn delay={16} x={44}>
+            <div style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 112, letterSpacing: -4, color: palette.text, lineHeight: 1 }}>
+              Trail<span style={{ color: palette.accent }}>Browser</span>
+            </div>
+          </SlideIn>
+          <div style={{ height: 5, width: 300, marginTop: 16, borderRadius: 3, background: palette.accent, transform: `scaleX(${bar})`, transformOrigin: "left", boxShadow: `0 0 ${18 + pulse(frame, 9) * 14}px ${palette.accentGlow}` }} />
+          <Rise delay={24}>
+            <div style={{ marginTop: 20, fontFamily: monoFont, fontSize: 24, color: palette.textDim, letterSpacing: 1 }}>
+              A simple native browser — light on memory, with AI built in.
+            </div>
+          </Rise>
+        </div>
       </div>
     </AbsoluteFill>
   );
@@ -368,14 +425,17 @@ const OutroScene: React.FC = () => {
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
       <Backdrop glowY={50} />
-      <div style={{ textAlign: "center", transform: `translateY(${lift}px) scale(${0.86 + Math.min(1, pop) * 0.14})` }}>
-        <div style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 124, letterSpacing: -4, color: palette.text }}>
+      <div style={{ textAlign: "center", transform: `translateY(${lift}px) scale(${0.9 + Math.min(1, pop) * 0.1})` }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+          <TrailMark size={148} tile={false} drawDelay={2} drawDur={24} uid="outro" />
+        </div>
+        <div style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 116, letterSpacing: -4, color: palette.text }}>
           Trail<span style={{ color: palette.accent }}>Browser</span>
         </div>
-        <Rise delay={10}>
-          <div style={{ marginTop: 20, fontFamily: monoFont, fontSize: 24, color: palette.textDim }}>The browser that gets out of your way.</div>
+        <Rise delay={12}>
+          <div style={{ marginTop: 16, fontFamily: monoFont, fontSize: 24, color: palette.textDim }}>The browser that gets out of your way.</div>
         </Rise>
-        <Pop delay={18} from={0.85}>
+        <Pop delay={22} from={0.85}>
           <div style={{ marginTop: 38, display: "inline-flex", alignItems: "center", gap: 12, fontFamily: monoFont, fontSize: 18, color: palette.text, background: palette.surfaceHi, border: `1px solid ${palette.border}`, borderRadius: 12, padding: "14px 22px", boxShadow: `0 0 ${16 + pulse(frame, 8) * 22}px ${palette.accentGlow}` }}>
             <StatusDot /> <span style={{ color: palette.accent }}>$</span> make &amp;&amp; open TrailBrowser.app
           </div>
