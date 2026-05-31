@@ -1,7 +1,8 @@
 # TrailBrowser explainer video
 
 A self-contained [Remotion](https://www.remotion.dev/) explainer for TrailBrowser.
-1920×1080 · 30fps · ~24s. Theme mirrors `TBTheme` (near-black + `#f76b1c`).
+1920×1080 · 30fps · ~11s, fast-cut with animated slide/wipe/fade transitions.
+Theme mirrors `TBTheme` (near-black + `#f76b1c`).
 
 ## Setup
 
