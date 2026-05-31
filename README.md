@@ -1,12 +1,30 @@
 # TrailBrowser
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-f76b1c.svg)](LICENSE)
+[![Platform: macOS 11+](https://img.shields.io/badge/Platform-macOS%2011%2B-111113.svg)](#requirements)
+[![Language: Objective-C](https://img.shields.io/badge/Language-Objective--C-555.svg)](#)
+
 A small, fast, native **macOS** browser shell built on Apple's system WebKit
 engine — no Electron, no bundled Chromium.
 
 - Objective-C + AppKit for the native window, toolbar, and sidebar
 - `WKWebView` (system WebKit) for real website rendering
 
-The app is the native UI *around* WebKit; it is not a rendering engine.
+The app is the native UI *around* WebKit; it is not a rendering engine. In a
+12-tab benchmark with every tab preloaded and kept live, it used roughly **half**
+the resident memory of Google Chrome loading the same sites (~1.7 GB vs ~3.7 GB),
+and substantially less once background tabs sleep. Reproduce with
+[`tools/bench-memory.sh`](tools/bench-memory.sh).
+
+<!-- TODO: add a screenshot, e.g. docs/screenshot.png, and reference it here:
+![TrailBrowser](docs/screenshot.png) -->
+
+## Requirements
+
+- macOS 11 (Big Sur) or later
+- Xcode Command Line Tools (`xcode-select --install`)
+- Optional, for the AI assistant: the [`codex`](https://github.com/openai/codex)
+  **or** `claude` CLI on your `PATH` (choose the engine in Settings)
 
 ## Features
 
@@ -18,11 +36,11 @@ The app is the native UI *around* WebKit; it is not a rendering engine.
 - A **settings page** (`Cmd+,`) for syncing Chrome cookies and more
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
   slept), and hover-to-close
-- **Efficient memory & process use:** a single shared web-content process pool
-  and one shared cookie/data store across tabs; inactive tabs release their
-  `WKWebView` (keeping only URL/title/favicon), so dozens of open tabs cost
-  roughly one live WebKit page
-- A built-in **page assistant** (Ask / Edit) powered by the `codex` CLI
+- **Efficient memory & process use:** WebKit shares content processes across
+  tabs over one shared data store; recently-used tabs stay live (instant switch
+  back) while older and background tabs are slept under a budget and on system
+  memory pressure — far lighter than a Chromium renderer-per-tab
+- A built-in **page assistant** (Ask / Edit) powered by the `codex` or `claude` CLI
 - A 2px accent loading bar and a status dot
 - Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`, `Cmd+B`, `Cmd+,`,
   `Cmd+[`, `Cmd+]`
@@ -49,7 +67,7 @@ See [AGENTS.md](AGENTS.md) for architecture and conventions, and
 
 ## Build & run
 
-Requires the Xcode Command Line Tools (`xcode-select --install`).
+See [Requirements](#requirements) above.
 
 ```sh
 make            # builds TrailBrowser.app
@@ -59,7 +77,8 @@ make clean
 
 Type in the top address bar and press Return: full URLs and domain-like inputs
 open as websites, while phrases become Google searches. The home page's Google ⇄
-AI toggle chooses between a normal search and Codex Deep Search.
+AI toggle chooses between a normal search and an AI-generated page built by your
+selected engine (`codex` or `claude`).
 
 ## Internal pages
 
@@ -136,13 +155,23 @@ The UI is native AppKit, themed near-black with a warm-orange accent
 The web page itself is rendered by WebKit: `WKWebView` displays the site;
 `loadRequest:`, `goBack`, `goForward`, and `reload` drive navigation; and
 key-value observing tracks `estimatedProgress`, `URL`, `canGoBack`, and
-`canGoForward` so the UI stays in sync. All web views share one
-`WKProcessPool` and the default `WKWebsiteDataStore`, and inactive tabs are
-slept to keep memory close to a single live WebKit page.
+`canGoForward` so the UI stays in sync. All web views share the default
+`WKWebsiteDataStore` (WebKit consolidates content processes automatically), a
+bounded pool of recently-used tabs stays live so switching back is instant, and
+tabs beyond that pool — or all background tabs under system memory pressure —
+are slept (their `WKWebView` released, keeping only URL/title/favicon).
 
 This is a native browser shell, not a custom browser engine. WebKit handles
 parsing HTML, applying CSS, running JavaScript, loading images, and navigation.
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for build and
+style notes, [AGENTS.md](AGENTS.md) for architecture, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security issues: please follow
+[SECURITY.md](SECURITY.md) and report privately. Release notes live in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © Yug Gupta

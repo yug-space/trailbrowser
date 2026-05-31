@@ -1,11 +1,13 @@
 # Contributing to TrailBrowser
 
-Thanks for your interest in TrailBrowser — a small native browser shell built on
-the system WebKit engine (AppKit/WebKit on macOS, GTK/WebKitGTK on Linux).
+Thanks for your interest in TrailBrowser — a small native macOS browser shell
+built on the system WebKit engine (AppKit + `WKWebView`).
 
 ## Getting set up
 
-Requires the Xcode Command Line Tools (`xcode-select --install`).
+Requires macOS 11+ and the Xcode Command Line Tools (`xcode-select --install`).
+The AI page assistant additionally needs the `codex` or `claude` CLI on `PATH`
+(optional; choose the engine in Settings).
 
 ```sh
 make            # builds TrailBrowser.app
@@ -58,7 +60,7 @@ end to end, for example:
 - Tabs: open (`Cmd+T` or the `+`), switch, hover-to-close, tab sleeping.
 - Home page: Google vs AI search toggle, quick links.
 - Settings: open via the sidebar or `Cmd+,`; Sync Chrome Cookies.
-- Page assistant: Ask and Edit (requires the `codex` CLI on `PATH`).
+- Page assistant: Ask and Edit (requires the `codex` or `claude` CLI on `PATH`).
 
 Note what you tested in your PR description.
 
@@ -75,7 +77,10 @@ TrailBrowser is defensive and local-only: no telemetry, and the cookie import
 and assistant are always user-initiated. When adding code that touches the
 network, the filesystem, or spawns processes, keep it explicit and
 user-triggered, and redact secrets in anything written to disk (see the URL
-redaction in `BrowserAppDelegate.m` and `trailbrowser.c`).
+redaction in `BrowserAppDelegate.m` and `mcp-history-server/server.mjs`).
+
+See [SECURITY.md](SECURITY.md) for the security posture and how to report
+vulnerabilities.
 
 ## License
 

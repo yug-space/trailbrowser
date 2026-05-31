@@ -28,26 +28,25 @@ mac-browser/
   TBTheme.{h,m}              # Color palette + layer animation helper
   ChromeCookieImporter.{h,m} # Reads cookies from a local Chrome profile
   Info.plist                 # App bundle metadata
-  home/                      # Bundled internal pages (Home + Settings)
+  home/                      # Bundled internal pages
     Home.{html,css,js}       # trailbrowser://home  (search / quick links)
-    Settings.{html,css,js}   # trailbrowser://settings (sync cookies, etc.)
-linux-browser/trailbrowser.c # GTK/WebKitGTK browser
+    Settings.{html,css,js}   # trailbrowser://settings (sync cookies, AI engine)
+    Onboarding.{html,css,js} # trailbrowser://welcome (first-run)
 mcp-history-server/server.mjs# Read-only history MCP server
-Makefile                     # Auto-selects macOS or Linux target
+Makefile                     # Builds the macOS app + MCP helpers
 ```
 
 ## Build & run
 
 ```sh
-make            # builds the native target for the current OS
+make            # builds TrailBrowser.app
 make run-browser
 make clean
 ```
 
-macOS produces `TrailBrowser.app`; Linux produces `./trailbrowser`. On Linux,
-install deps first (see README). The macOS app links `Cocoa`, `WebKit`,
-`Security`, `QuartzCore`, and `sqlite3` — **add new frameworks to
-`APP_FRAMEWORKS` in the Makefile**, not just an `#import`.
+The macOS app links `Cocoa`, `WebKit`, `Security`, `QuartzCore`, and `sqlite3`
+— **add new frameworks to `APP_FRAMEWORKS` in the Makefile**, not just an
+`#import`.
 
 There is no test suite; verify by building and running the app and exercising
 the changed flow (navigation, tabs, assistant, settings, cookie import).
@@ -77,7 +76,7 @@ the changed flow (navigation, tabs, assistant, settings, cookie import).
 | `trailbrowser://home` | Load the native home page |
 | `trailbrowser://settings` | Load the native settings page |
 | `trailbrowser://open?input=…` | Open a URL / run a search |
-| `trailbrowser://deep-search?q=…` | Run Codex Deep Search |
+| `trailbrowser://deep-search?q=…` | Generate an AI page for the query |
 | `trailbrowser://sync-cookies` | Import cookies from Chrome |
 | `trailbrowser://assistant` | Open the page assistant bar |
 
@@ -86,9 +85,12 @@ Bundled JS (e.g. `Home.js`, `Settings.js`) talks to the native app by setting
 
 ## Gotchas
 
-- **The page assistant shells out to the `codex` CLI** (`runCodexWithPrompt:`),
-  searching `~/.nvm/.../bin`, `/opt/homebrew/bin`, `/usr/local/bin`. It runs
-  read-only/sandboxed. Without `codex` installed the assistant returns an error.
+- **The page assistant shells out to a CLI** (`runAIWithPrompt:enableSearch:effortOverride:completion:`),
+  either `codex` (default) or `claude` per the `TBAIEngine` preference, searching
+  `~/.nvm/.../bin`, `/opt/homebrew/bin`, `/usr/local/bin`. Codex runs
+  read-only/sandboxed. Without the selected CLI installed the assistant returns
+  an error. Note: web search (`--search`) requires at least `low` reasoning
+  effort — `minimal` + search is rejected by the API.
 - **History/state** are written to `~/Library/Application Support/TrailBrowser/`
   (`history.jsonl`, `state.json`); URLs are redacted for sensitive query keys.
   The MCP server reads these.

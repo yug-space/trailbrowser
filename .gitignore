@@ -1,8 +1,19 @@
 # Generated app bundle
 TrailBrowser.app
 
+# Build artifacts
+*.o
+*.dSYM/
+build/
+
 # Node dependencies
 node_modules
+npm-debug.log*
 
 # macOS
 .DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
