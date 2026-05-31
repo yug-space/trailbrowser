@@ -1,5 +1,3 @@
-// TBControls.m - Implementation of TrailBrowser's themed AppKit controls.
-
 #import "TBControls.h"
 #import "TBTheme.h"
 
@@ -41,11 +39,14 @@
 - (void)mouseExited:(NSEvent *)event { (void)event; self.hovering = NO; [self refreshBackground]; }
 - (void)setHighlighted:(BOOL)highlighted { [super setHighlighted:highlighted]; [self refreshBackground]; }
 - (void)setEnabled:(BOOL)enabled { [super setEnabled:enabled]; [self refreshBackground]; }
+- (void)setActive:(BOOL)active { _active = active; [self refreshBackground]; }
 
 - (void)refreshBackground {
     NSColor *color = NSColor.clearColor;
     if (self.isEnabled && (self.hovering || self.isHighlighted)) {
         color = [NSColor colorWithWhite:1.0 alpha:(self.isHighlighted ? 0.16 : 0.08)];
+    } else if (self.active) {
+        color = [NSColor colorWithWhite:1.0 alpha:0.10];
     }
     TBAnimateBackground(self.layer, color, 0.16);
 }

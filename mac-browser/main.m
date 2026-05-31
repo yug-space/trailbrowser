@@ -1,5 +1,3 @@
-// main.m - TrailBrowser entry point.
-
 #import <Cocoa/Cocoa.h>
 
 #import "BrowserAppDelegate.h"

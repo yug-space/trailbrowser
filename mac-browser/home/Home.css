@@ -37,7 +37,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 30px;
-  /* sit a little above center, like Perplexity */
+
   margin-top: -6vh;
   animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
@@ -66,8 +66,6 @@ body {
   letter-spacing: -2px;
   color: var(--text);
 }
-
-/* Search card -------------------------------------------------------------- */
 
 .search-card {
   width: 100%;
@@ -115,7 +113,6 @@ body {
   flex: 1;
 }
 
-/* Google ⇄ AI segmented toggle, bottom-right of the search box. */
 .seg {
   display: inline-flex;
   align-items: center;
@@ -176,8 +173,6 @@ body {
   opacity: 0.4;
   cursor: default;
 }
-
-/* Quick links -------------------------------------------------------------- */
 
 .suggestions {
   display: flex;

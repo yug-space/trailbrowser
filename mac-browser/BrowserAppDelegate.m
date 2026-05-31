@@ -1,9 +1,3 @@
-// BrowserAppDelegate.m - The TrailBrowser application controller.
-//
-// AppKit draws the window and controls; WKWebView renders pages. This file
-// owns window construction, navigation, the sidebar tab list, the page
-// assistant (Codex), history/state persistence, and Chrome cookie import.
-
 #import "BrowserAppDelegate.h"
 
 #import <QuartzCore/QuartzCore.h>
@@ -27,7 +21,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self buildMenu];
     [self buildWindow];
     [self writeBrowserStateRunning:YES];
-    [self newTabWithURLString:[self homeURLString] select:YES];
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL onboarded = [defaults boolForKey:@"TBHasOnboarded"];
+    if (!onboarded) {
+        [defaults setBool:YES forKey:@"TBHasOnboarded"];
+        [self newTabWithURLString:[self onboardingURLString] select:YES];
+    } else {
+        [self newTabWithURLString:[self homeURLString] select:YES];
+    }
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
@@ -131,7 +133,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     root.layer.backgroundColor = TBBg().CGColor;
     self.window.contentView = root;
 
-    // Toolbar: flat near-black surface with a hairline bottom border.
     NSView *toolbar = [[NSView alloc] initWithFrame:NSZeroRect];
     toolbar.translatesAutoresizingMaskIntoConstraints = NO;
     toolbar.wantsLayer = YES;
@@ -159,7 +160,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                               tooltip:@"Reload"
                                                action:@selector(reloadPage:)];
 
-    // Address bar: a rounded "pill" container holding a leading glyph + field.
     self.addressContainer = [[TBFieldContainer alloc] initWithFrame:NSZeroRect];
     self.addressContainer.translatesAutoresizingMaskIntoConstraints = NO;
     [toolbar addSubview:self.addressContainer];
@@ -195,21 +195,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (@available(macOS 10.12.2, *)) self.addressField.allowsCharacterPickerTouchBarItem = NO;
     [self.addressContainer addSubview:self.addressField];
 
-    // Status pill (dot + label) on the trailing edge of the toolbar.
+    ((TBFlatButton *)self.sidebarToggleButton).active = self.sidebarVisible;
+
     self.statusDot = [[NSView alloc] initWithFrame:NSZeroRect];
     self.statusDot.translatesAutoresizingMaskIntoConstraints = NO;
     self.statusDot.wantsLayer = YES;
     self.statusDot.layer.cornerRadius = 3.0;
     self.statusDot.layer.backgroundColor = TBOk().CGColor;
+    self.statusDot.toolTip = @"Ready";
     [toolbar addSubview:self.statusDot];
 
-    self.statusLabel = [NSTextField labelWithString:@"Ready"];
-    self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusLabel.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
-    self.statusLabel.textColor = TBMuted();
-    self.statusLabel.alignment = NSTextAlignmentLeft;
-
-    // Accent "Ask" button — the prominent primary action, like the reference RUN.
     self.askButton = [[TBPillButton alloc] initWithFrame:NSZeroRect];
     self.askButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.askButton.pillStyle = TBPillStyleAccent;
@@ -218,6 +213,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.askButton.target = self;
     self.askButton.action = @selector(openAssistant:);
     [toolbar addSubview:self.askButton];
+
+    self.settingsButton = [self toolbarButtonWithSymbol:@"gearshape"
+                                               fallback:@"S"
+                                                tooltip:@"Settings"
+                                                 action:@selector(openSettings:)];
+    [toolbar addSubview:self.settingsButton];
 
     self.progressBar = [[TBProgressBar alloc] initWithFrame:NSZeroRect];
     self.progressBar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -228,7 +229,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     contentArea.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:contentArea];
 
-    // Sidebar: flat surface (no vibrancy) with a hairline trailing separator.
     self.sidebar = [[NSView alloc] initWithFrame:NSZeroRect];
     self.sidebar.translatesAutoresizingMaskIntoConstraints = NO;
     self.sidebar.wantsLayer = YES;
@@ -245,7 +245,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [contentArea addSubview:self.webContainer];
     [self buildAssistantOverlay];
 
-    // TABS section header with a live count badge.
     NSView *tabHeader = [[NSView alloc] initWithFrame:NSZeroRect];
     tabHeader.translatesAutoresizingMaskIntoConstraints = NO;
     [self.sidebar addSubview:tabHeader];
@@ -282,8 +281,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabTable.focusRingType = NSFocusRingTypeNone;
     self.tabTable.dataSource = self;
     self.tabTable.delegate = self;
-    // macOS 11+ defaults to an inset "automatic" style that pads rows heavily;
-    // plain keeps cells flush so they align with the section headers.
+
     if (@available(macOS 11.0, *)) self.tabTable.style = NSTableViewStylePlain;
 
     NSTableColumn *tabColumn = [[NSTableColumn alloc] initWithIdentifier:@"TabColumn"];
@@ -301,7 +299,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     tabScrollView.drawsBackground = NO;
     [self.sidebar addSubview:tabScrollView];
 
-    // Sidebar bottom: SHORTCUTS — a clean vertical list of quick links.
     NSTextField *shortcutsTitle = [self sectionHeaderLabel:@"SHORTCUTS"];
     [self.sidebar addSubview:shortcutsTitle];
 
@@ -318,7 +315,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     shortcuts.spacing = 1.0;
     [self.sidebar addSubview:shortcuts];
 
-    // Bottom: a Settings-style row that syncs (imports) cookies from Chrome.
     NSView *settingsDivider = [self hairlineView];
     [self.sidebar addSubview:settingsDivider];
 
@@ -328,15 +324,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self.sidebar addSubview:settingsRow];
 
     for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton,
-                           self.addressContainer, self.reloadButton, self.statusDot, self.statusLabel,
-                           self.askButton, self.progressBar ]) {
+                           self.addressContainer, self.reloadButton, self.statusDot,
+                           self.askButton, self.settingsButton, self.progressBar ]) {
         [toolbar addSubview:view];
     }
 
     self.sidebarWidthConstraint = [self.sidebar.widthAnchor constraintEqualToConstant:240.0];
 
-    // Center the address bar in the toolbar (like the reference), but let it
-    // yield and shrink before it would overlap the flanking control clusters.
     NSLayoutConstraint *addressCenter = [self.addressContainer.centerXAnchor constraintEqualToAnchor:toolbar.centerXAnchor];
     addressCenter.priority = NSLayoutPriorityDefaultHigh - 1;
     NSLayoutConstraint *addressWidth = [self.addressContainer.widthAnchor constraintEqualToConstant:440.0];
@@ -353,7 +347,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [toolbarHairline.bottomAnchor constraintEqualToAnchor:toolbar.bottomAnchor],
         [toolbarHairline.heightAnchor constraintEqualToConstant:1.0],
 
-        // Left cluster: sidebar toggle + back/forward.
         [self.sidebarToggleButton.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor constant:88.0],
         [self.sidebarToggleButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
@@ -362,7 +355,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.forwardButton.leadingAnchor constraintEqualToAnchor:self.backButton.trailingAnchor constant:6.0],
         [self.forwardButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
-        // Centered address bar.
         addressCenter,
         addressWidth,
         [self.addressContainer.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.forwardButton.trailingAnchor constant:16.0],
@@ -379,17 +371,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.addressField.trailingAnchor constraintEqualToAnchor:self.addressContainer.trailingAnchor constant:-12.0],
         [self.addressField.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
 
-        // Right cluster: reload · status pill · Ask, anchored from the trailing edge.
-        [self.askButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-16.0],
+        [self.settingsButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-14.0],
+        [self.settingsButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+
+        [self.askButton.trailingAnchor constraintEqualToAnchor:self.settingsButton.leadingAnchor constant:-10.0],
         [self.askButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
         [self.askButton.widthAnchor constraintEqualToConstant:56.0],
         [self.askButton.heightAnchor constraintEqualToConstant:30.0],
 
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-10.0],
-        [self.statusLabel.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-        [self.statusLabel.widthAnchor constraintEqualToConstant:54.0],
-
-        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.statusLabel.leadingAnchor constant:-6.0],
+        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-12.0],
         [self.statusDot.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
         [self.statusDot.widthAnchor constraintEqualToConstant:6.0],
         [self.statusDot.heightAnchor constraintEqualToConstant:6.0],
@@ -466,8 +456,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.window.initialFirstResponder = self.addressField;
     [self.window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
-    // Focus the address bar on launch so you can type a URL or search term
-    // immediately, without having to click into it first.
+
     [self.window makeFirstResponder:self.addressField];
 }
 
@@ -571,9 +560,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabCountLabel.stringValue = [NSString stringWithFormat:@"%lu", (unsigned long)self.tabs.count];
 }
 
-// Drive the toolbar status pill: dot color + short label.
 - (void)setStatusText:(NSString *)text {
-    self.statusLabel.stringValue = text ?: @"";
     NSColor *dotColor = TBMuted();
     if ([text isEqualToString:@"Ready"]) {
         dotColor = TBOk();
@@ -583,6 +570,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         dotColor = TBError();
     }
     self.statusDot.layer.backgroundColor = dotColor.CGColor;
+    self.statusDot.toolTip = text.length ? text : @"Ready";
 }
 
 - (NSButton *)toolbarButtonWithSymbol:(NSString *)symbol
@@ -872,6 +860,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)configureForLowMemory:(WKWebViewConfiguration *)configuration {
+
+    configuration.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
     configuration.suppressesIncrementalRendering = YES;
     configuration.allowsAirPlayForMediaPlayback = NO;
     configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
@@ -956,12 +946,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         NSIndexSet *columns = [NSIndexSet indexSetWithIndex:0];
         [self.tabTable reloadDataForRowIndexes:rows columnIndexes:columns];
     }
+    [self refreshActiveRowHighlight];
 
     if (self.webView.URL == nil && tab.urlString.length > 0) {
         if ([self isHomeURLString:tab.urlString]) {
             [self loadNativeHomePageInWebView:self.webView];
         } else if ([self isSettingsURLString:tab.urlString]) {
             [self loadNativeSettingsPageInWebView:self.webView];
+        } else if ([self isOnboardingURLString:tab.urlString]) {
+            [self loadNativeOnboardingPageInWebView:self.webView];
         } else {
             NSURL *url = [self URLForUserInput:tab.urlString];
             if (url) [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
@@ -1020,11 +1013,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return;
     }
 
-    // Closing a background tab: keep the visible page, just fix up the index.
     if (closingIndex < self.activeTabIndex) self.activeTabIndex -= 1;
     [self.tabTable reloadData];
     [self.tabTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)self.activeTabIndex]
                byExtendingSelection:NO];
+    [self refreshActiveRowHighlight];
     [self updateControls];
 }
 
@@ -1050,6 +1043,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return;
     }
 
+    if ([self isOnboardingURLString:input]) {
+        [self loadNativeOnboardingPageInWebView:self.webView];
+        return;
+    }
+
     NSURL *url = [self URLForUserInput:input];
     if (!url) {
         NSBeep();
@@ -1071,6 +1069,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     return @"trailbrowser://settings";
 }
 
+- (NSString *)onboardingURLString {
+    return @"trailbrowser://welcome";
+}
+
 - (BOOL)isHomeURLString:(NSString *)input {
     NSString *trimmed = [[input ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
     return [trimmed isEqualToString:@"trailbrowser://home"] ||
@@ -1084,7 +1086,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
            [trimmed isEqualToString:@"trailbrowser://settings/"];
 }
 
-// Load a bundled HTML page (Home, Settings, …) from Resources/home.
+- (BOOL)isOnboardingURLString:(NSString *)input {
+    NSString *trimmed = [[input ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return [trimmed isEqualToString:@"trailbrowser://welcome"] ||
+           [trimmed isEqualToString:@"trailbrowser://welcome/"];
+}
+
 - (NSString *)nativeResourceHTMLNamed:(NSString *)name {
     NSURL *url = [[NSBundle mainBundle] URLForResource:name withExtension:@"html" subdirectory:@"home"];
     NSError *error = nil;
@@ -1112,6 +1119,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (BOOL)isNativeSettingsFileURL:(NSURL *)url {
     return [self isNativeFileURLNamed:@"Settings.html" url:url];
+}
+
+- (BOOL)isNativeOnboardingFileURL:(NSURL *)url {
+    return [self isNativeFileURLNamed:@"Onboarding.html" url:url];
 }
 
 - (NSString *)queryValueNamed:(NSString *)name inURL:(NSURL *)url {
@@ -1145,6 +1156,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     if ([host isEqualToString:@"settings"]) {
         if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"welcome"]) {
+        if (self.webView) [self loadNativeOnboardingPageInWebView:self.webView];
         return YES;
     }
 
@@ -1186,6 +1202,20 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.stringValue = [self settingsURLString];
     [self setStatusText:@"Ready"];
     [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Settings"]
+                    baseURL:[self nativeResourceBaseURL]];
+}
+
+- (void)loadNativeOnboardingPageInWebView:(WKWebView *)webView {
+    BrowserTab *tab = [self tabForWebView:webView];
+    if (tab) {
+        tab.title = @"Welcome";
+        tab.urlString = [self onboardingURLString];
+        tab.favicon = nil;
+        [self reloadSidebarRowForTab:tab];
+    }
+    self.addressField.stringValue = [self onboardingURLString];
+    [self setStatusText:@"Ready"];
+    [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Onboarding"]
                     baseURL:[self nativeResourceBaseURL]];
 }
 
@@ -1407,10 +1437,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         self.sidebar.hidden = NO;
         self.sidebarSeparator.hidden = NO;
     }
+    ((TBFlatButton *)self.sidebarToggleButton).active = self.sidebarVisible;
 
-    self.sidebarWidthConstraint.constant = self.sidebarVisible ? 220.0 : 0.0;
+    self.sidebarWidthConstraint.constant = self.sidebarVisible ? 240.0 : 0.0;
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-        context.duration = 0.18;
+        context.duration = 0.2;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
         [self.window.contentView layoutSubtreeIfNeeded];
     } completionHandler:^{
         if (!self.sidebarVisible) {
@@ -1922,8 +1954,17 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (NSTableRowView *)tableView:(NSTableView *)tableView rowViewForRow:(NSInteger)row {
     (void)tableView;
-    (void)row;
-    return [[BrowserTabRowView alloc] initWithFrame:NSZeroRect];
+    BrowserTabRowView *rowView = [[BrowserTabRowView alloc] initWithFrame:NSZeroRect];
+    rowView.activeTab = (row == self.activeTabIndex);
+    return rowView;
+}
+
+- (void)refreshActiveRowHighlight {
+    [self.tabTable enumerateAvailableRowViewsUsingBlock:^(NSTableRowView *rowView, NSInteger row) {
+        if ([rowView isKindOfClass:BrowserTabRowView.class]) {
+            ((BrowserTabRowView *)rowView).activeTab = (row == self.activeTabIndex);
+        }
+    }];
 }
 
 - (NSString *)subtitleForTab:(BrowserTab *)tab {
@@ -2116,7 +2157,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     BOOL selected = row == self.activeTabIndex;
     cell.closeButton.tag = row;
     cell.closeButton.hidden = !cell.hovering;
-    // A slept (unloaded) background tab reads as dimmed; the active tab is bright.
+
     BOOL sleeping = (!selected && tab.webView == nil);
     cell.titleLabel.stringValue = tab.title.length ? tab.title : @"New Tab";
     cell.subtitleLabel.stringValue = [self subtitleForTab:tab];
@@ -2172,6 +2213,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return;
     }
 
+    if ([self isOnboardingURLString:tab.urlString] || [self isNativeOnboardingFileURL:webView.URL]) {
+        tab.title = @"Welcome";
+        tab.urlString = [self onboardingURLString];
+        [self reloadSidebarRowForTab:tab];
+        return;
+    }
+
     NSString *previousHost = [NSURL URLWithString:tab.urlString ?: @""].host.lowercaseString;
     NSString *currentHost = webView.URL.host.lowercaseString;
     if (previousHost.length > 0 &&
@@ -2213,13 +2261,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 
     ChromeProfile *profile = [self promptForProfileFrom:profiles];
-    if (!profile) return;  // user cancelled
+    if (!profile) return;
 
     [self performCookieImportForProfile:profile];
 }
 
-// Show a confirmation that also lets the user pick a profile when more than one
-// exists. Returns the chosen profile, or nil if the user cancelled.
 - (ChromeProfile *)promptForProfileFrom:(NSArray<ChromeProfile *> *)profiles {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.alertStyle = NSAlertStyleInformational;
@@ -2332,6 +2378,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
     if ([self isSettingsURLString:tab.urlString]) {
         self.addressField.stringValue = [self settingsURLString];
+        return;
+    }
+    if ([self isOnboardingURLString:tab.urlString]) {
+        self.addressField.stringValue = [self onboardingURLString];
         return;
     }
 

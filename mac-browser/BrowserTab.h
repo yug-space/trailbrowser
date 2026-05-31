@@ -1,8 +1,3 @@
-// BrowserTab.h - Model for a single browser tab.
-//
-// Inactive tabs release their WKWebView to save memory but keep URL/title/
-// favicon metadata so they can be restored on demand (low-memory tab sleeping).
-
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 

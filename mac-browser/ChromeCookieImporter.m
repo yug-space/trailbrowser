@@ -1,10 +1,3 @@
-// ChromeCookieImporter.m - see ChromeCookieImporter.h for the contract.
-//
-// Pipeline: locate the Chrome user-data dir -> read the per-profile Cookies
-// SQLite database -> fetch the AES key from "Chrome Safe Storage" in the
-// Keychain -> decrypt each value (AES-128-CBC) -> build NSHTTPCookie objects ->
-// inject them into the supplied WKHTTPCookieStore.
-
 #import "ChromeCookieImporter.h"
 
 #import <WebKit/WebKit.h>
@@ -14,8 +7,6 @@
 
 static NSString *const kChromeCookieErrorDomain = @"TrailBrowser.ChromeCookieImporter";
 
-// Chrome stores timestamps as microseconds since 1601-01-01; subtract this many
-// seconds to reach the Unix epoch (1970-01-01).
 static const double kWindowsEpochToUnixSeconds = 11644473600.0;
 
 @implementation ChromeProfile
@@ -28,8 +19,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
 
 #pragma mark - Filesystem layout
 
-// Root Chrome user-data directory for the current user, or nil if Chrome's
-// folder is absent.
 + (nullable NSString *)chromeUserDataDirectory {
     NSString *home = NSHomeDirectory();
     NSString *path = [home stringByAppendingPathComponent:
@@ -45,8 +34,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     return [self chromeUserDataDirectory] != nil;
 }
 
-// Resolve the Cookies SQLite file for a profile. Recent Chrome keeps it under
-// the "Network" subdirectory; older versions kept it at the profile root.
 + (nullable NSString *)cookiesPathForProfileDirectory:(NSString *)directory {
     NSString *root = [self chromeUserDataDirectory];
     if (!root) return nil;
@@ -70,7 +57,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     NSString *root = [self chromeUserDataDirectory];
     if (!root) return @[];
 
-    // "Local State" carries friendly names and account emails per profile dir.
     NSDictionary *infoCache = nil;
     NSData *localState = [NSData dataWithContentsOfFile:
                           [root stringByAppendingPathComponent:@"Local State"]];
@@ -95,7 +81,7 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
         BOOL looksLikeProfile = [entry isEqualToString:@"Default"] ||
                                 [entry hasPrefix:@"Profile "];
         if (!looksLikeProfile) continue;
-        if (![self cookiesPathForProfileDirectory:entry]) continue;  // no cookies, skip
+        if (![self cookiesPathForProfileDirectory:entry]) continue;
 
         NSDictionary *cache = infoCache[entry];
         NSString *name = nil;
@@ -112,7 +98,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
         [profiles addObject:profile];
     }
 
-    // Show "Default" first, then "Profile 1", "Profile 2", ... in order.
     [profiles sortUsingComparator:^NSComparisonResult(ChromeProfile *a, ChromeProfile *b) {
         if ([a.directory isEqualToString:@"Default"]) return NSOrderedAscending;
         if ([b.directory isEqualToString:@"Default"]) return NSOrderedDescending;
@@ -124,9 +109,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
 
 #pragma mark - Decryption key
 
-// The AES key is PBKDF2(HMAC-SHA1) over the "Chrome Safe Storage" Keychain
-// password with a fixed salt and iteration count, matching Chromium's
-// OSCrypt on macOS.
 + (nullable NSData *)decryptionKeyWithError:(NSError **)error {
     NSDictionary *query = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
@@ -181,20 +163,17 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     return [NSData dataWithBytes:derived length:sizeof(derived)];
 }
 
-// Decrypt a single "v10"/"v11"-prefixed encrypted_value blob. Returns nil for
-// blobs we cannot decrypt (caller falls back to the plaintext value column).
 + (nullable NSString *)decryptValue:(NSData *)encrypted withKey:(NSData *)key {
     if (encrypted.length <= 3) return nil;
 
     const unsigned char *bytes = encrypted.bytes;
     if (!(bytes[0] == 'v' && (bytes[1] == '1') && (bytes[2] == '0' || bytes[2] == '1'))) {
-        return nil;  // not the macOS v10/v11 scheme
+        return nil;
     }
 
     NSData *cipher = [encrypted subdataWithRange:NSMakeRange(3, encrypted.length - 3)];
     if (cipher.length == 0 || (cipher.length % kCCBlockSizeAES128) != 0) return nil;
 
-    // Chromium uses a 16-space IV for cookie values on macOS.
     unsigned char iv[kCCBlockSizeAES128];
     memset(iv, ' ', sizeof(iv));
 
@@ -210,9 +189,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     if (status != kCCSuccess) return nil;
     plain.length = decryptedLength;
 
-    // Chrome v24+ prepends a 32-byte SHA-256 hash of the cookie's domain to the
-    // plaintext. If the value doesn't decode as UTF-8 but the 32-byte-stripped
-    // version does, drop the prefix.
     NSString *full = [[NSString alloc] initWithData:plain encoding:NSUTF8StringEncoding];
     if (full) return full;
 
@@ -242,7 +218,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     NSData *key = [self decryptionKeyWithError:error];
     if (!key) return nil;
 
-    // Chrome keeps the database open; copy it so we never contend on its lock.
     NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
                           [NSString stringWithFormat:@"TrailBrowser-Cookies-%@.sqlite",
                            [[NSUUID UUID] UUIDString]]];
@@ -312,7 +287,7 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
             NSData *encrypted = [NSData dataWithBytes:blob length:blobLength];
             value = [self decryptValue:encrypted withKey:key];
         }
-        if (value == nil) value = plainValue;   // unencrypted fallback
+        if (value == nil) value = plainValue;
         if (value == nil) continue;
 
         NSHTTPCookie *cookie = [self cookieWithHost:host
@@ -352,12 +327,11 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     NSMutableDictionary *properties = [NSMutableDictionary dictionary];
     properties[NSHTTPCookieName] = name;
     properties[NSHTTPCookieValue] = value;
-    properties[NSHTTPCookieDomain] = host;                       // leading "." preserved
+    properties[NSHTTPCookieDomain] = host;
     properties[NSHTTPCookiePath] = path.length ? path : @"/";
     if (secure) properties[NSHTTPCookieSecure] = @"TRUE";
     if (httpOnly) properties[@"HttpOnly"] = @YES;
 
-    // expires_utc == 0 marks a session cookie; leave NSHTTPCookieExpires unset.
     if (expiresUtc > 0) {
         double unixSeconds = (double)expiresUtc / 1000000.0 - kWindowsEpochToUnixSeconds;
         if (unixSeconds > 0) {
@@ -366,7 +340,7 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     }
 
     if (@available(macOS 10.15, *)) {
-        // Chrome samesite: -1 unspecified, 0 none, 1 lax, 2 strict.
+
         if (sameSite == 1) {
             properties[NSHTTPCookieSameSitePolicy] = NSHTTPCookieSameSiteLax;
         } else if (sameSite == 2) {

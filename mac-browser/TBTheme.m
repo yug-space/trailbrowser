@@ -1,5 +1,3 @@
-// TBTheme.m - Implementation of the shared palette and animation helpers.
-
 #import "TBTheme.h"
 
 static NSColor *TBHex(uint32_t rgb, CGFloat alpha) {

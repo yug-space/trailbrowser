@@ -1,8 +1,3 @@
-// BrowserAppDelegate.h - The application controller.
-//
-// Owns the window, toolbar, sidebar tab list, the WKWebView per tab, the page
-// assistant overlay, history/state persistence, and Chrome cookie import.
-
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 
@@ -30,9 +25,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSButton *addTabButton;
 @property (nonatomic, strong) NSButton *closeTabButton;
 @property (nonatomic, strong) TBPillButton *askButton;
+@property (nonatomic, strong) NSButton *settingsButton;
 @property (nonatomic, strong) TBProgressBar *progressBar;
 @property (nonatomic, strong) NSView *statusDot;
-@property (nonatomic, strong) NSTextField *statusLabel;
 @property (nonatomic, strong) NSVisualEffectView *assistantBar;
 @property (nonatomic, strong) NSSegmentedControl *assistantModeControl;
 @property (nonatomic, strong) NSTextField *assistantPromptField;

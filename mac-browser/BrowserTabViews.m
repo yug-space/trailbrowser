@@ -1,5 +1,3 @@
-// BrowserTabViews.m - Implementation of the sidebar tab row and cell views.
-
 #import "BrowserTabViews.h"
 #import "TBTheme.h"
 
@@ -21,17 +19,22 @@
 - (void)mouseEntered:(NSEvent *)event { (void)event; self.hovering = YES; [self setNeedsDisplay:YES]; }
 - (void)mouseExited:(NSEvent *)event { (void)event; self.hovering = NO; [self setNeedsDisplay:YES]; }
 
+- (void)setActiveTab:(BOOL)activeTab {
+    if (_activeTab == activeTab) return;
+    _activeTab = activeTab;
+    [self setNeedsDisplay:YES];
+}
+
 - (void)drawBackgroundInRect:(NSRect)dirtyRect {
     [super drawBackgroundInRect:dirtyRect];
 
     NSRect fillRect = NSInsetRect(self.bounds, 6.0, 3.0);
     NSBezierPath *fillPath = [NSBezierPath bezierPathWithRoundedRect:fillRect xRadius:8.0 yRadius:8.0];
 
-    if (self.selected) {
+    if (self.activeTab) {
         [TBElevated() setFill];
         [fillPath fill];
 
-        // A short accent bar hugging the card's left edge marks the active tab.
         NSRect accentRect = NSMakeRect(NSMinX(fillRect) + 5.0,
                                        NSMidY(fillRect) - 8.0,
                                        3.0,

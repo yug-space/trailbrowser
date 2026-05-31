@@ -1,18 +1,20 @@
 const syncButton = document.getElementById("sync-cookies");
-const homeButton = document.getElementById("open-home");
+const getStarted = document.getElementById("get-started");
+const skip = document.getElementById("skip");
 
 syncButton.addEventListener("click", () => {
-
   syncButton.disabled = true;
   syncButton.textContent = "Syncing…";
   window.location.href = "trailbrowser://sync-cookies";
-
   window.setTimeout(() => {
     syncButton.disabled = false;
     syncButton.textContent = "Sync Chrome Cookies";
   }, 2500);
 });
 
-homeButton.addEventListener("click", () => {
+function finish() {
   window.location.href = "trailbrowser://home";
-});
+}
+
+getStarted.addEventListener("click", finish);
+skip.addEventListener("click", finish);

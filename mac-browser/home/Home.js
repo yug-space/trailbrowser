@@ -3,7 +3,7 @@ const query = document.getElementById("query");
 const submit = document.getElementById("submit");
 const segButtons = Array.from(document.querySelectorAll(".seg-btn"));
 
-let mode = "google"; // "google" | "ai"
+let mode = "google";
 
 function currentValue() {
   return query.value.trim();
@@ -13,7 +13,6 @@ function refreshSubmitState() {
   submit.disabled = currentValue().length === 0;
 }
 
-// Grow the textarea with its content, up to the CSS max-height.
 function autoGrow() {
   query.style.height = "auto";
   query.style.height = `${query.scrollHeight}px`;
@@ -59,7 +58,6 @@ query.addEventListener("input", () => {
   refreshSubmitState();
 });
 
-// Enter submits; Shift+Enter inserts a newline.
 query.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
