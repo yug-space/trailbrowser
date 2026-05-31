@@ -88,11 +88,31 @@ function hostFromUrl(value) {
 function redactUrl(value) {
   try {
     const url = new URL(value);
+
+    // Query string.
     for (const [name] of url.searchParams) {
       if (isSensitiveQueryName(name)) {
         url.searchParams.set(name, "[redacted]");
       }
     }
+
+    // Credentials embedded in the URL (https://user:pass@host).
+    if (url.username) url.username = "[redacted]";
+    if (url.password) url.password = "[redacted]";
+
+    // Fragment: tokens often ride in the hash (OAuth implicit flow, #access_token=…).
+    if (url.hash.length > 1) {
+      const frag = new URLSearchParams(url.hash.slice(1));
+      let changed = false;
+      for (const [name] of frag) {
+        if (isSensitiveQueryName(name)) {
+          frag.set(name, "[redacted]");
+          changed = true;
+        }
+      }
+      if (changed) url.hash = `#${frag.toString()}`;
+    }
+
     return url.toString();
   } catch {
     return String(value || "");

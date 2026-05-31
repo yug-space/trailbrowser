@@ -35,7 +35,7 @@ mac: $(APP_BIN) $(APP_PLIST) mac-resources
 
 $(APP_BIN): $(APP_SOURCES) $(APP_HEADERS)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
-	$(CC) $(OBJCFLAGS) $(APP_FRAMEWORKS) $(APP_LIBS) -o $(APP_BIN) $(APP_SOURCES)
+	$(CC) $(OBJCFLAGS) -o $(APP_BIN) $(APP_SOURCES) $(APP_FRAMEWORKS) $(APP_LIBS)
 
 $(APP_PLIST): mac-browser/Info.plist
 	mkdir -p $(APP_BUNDLE)/Contents
@@ -54,7 +54,7 @@ mcp-install:                       # Install MCP server dependencies
 run-history-mcp:                   # Run read-only history MCP server over stdio
 	cd $(MCP_DIR) && npm start
 
-clean:                             # Remove built binaries
-	rm -rf $(APP_BUNDLE)
+clean:                             # Remove the built app and MCP dependencies
+	rm -rf $(APP_BUNDLE) $(MCP_DIR)/node_modules
 
 .PHONY: all mac mac-resources run-browser mcp-install run-history-mcp clean

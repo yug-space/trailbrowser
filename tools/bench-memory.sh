@@ -1,5 +1,11 @@
 #!/bin/zsh
+# Compare TrailBrowser vs Chrome resident memory loading the same tabs.
+# Isolates each browser so a running Safari/Chrome can't skew the numbers:
+#   - Chrome: sum the launched instance's process tree.
+#   - TrailBrowser: sum the app plus only the WebKit processes that appear
+#     after launch (WebKit XPC services are reparented to launchd, not the app).
 set -e
+cd "${0:A:h}/.."   # run from repo root regardless of caller's cwd
 
 URLS=(
   https://example.com
@@ -19,7 +25,13 @@ WAIT=${1:-30}
 APP=TrailBrowser.app/Contents/MacOS/TrailBrowser
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
-webkit_rss() { ps -axo rss,command | grep "com.apple.WebKit" | grep -v grep | awk '{s+=$1} END {printf "%d", s+0}'; }
+# PIDs of all live WebKit XPC processes (WebContent/Networking/GPU).
+webkit_pids() { pgrep -f "com.apple.WebKit" 2>/dev/null | sort -u; }
+# Sum RSS (KB) of a given newline-separated PID list.
+rss_of_pids() {
+  [ -z "$1" ] && { printf 0; return; }
+  ps -o rss= -p "$(echo "$1" | tr '\n' ',')" 2>/dev/null | awk '{s+=$1} END {printf "%d", s+0}'
+}
 proc_count() { ps -axo command | grep "$1" | grep -v grep | wc -l | tr -d ' '; }
 # Sum RSS (KB) of a PID and all its descendants — isolates one browser instance
 tree_rss() {
@@ -44,20 +56,20 @@ tree_count() {
 echo "### TrailBrowser ###"
 pkill -f "$APP" 2>/dev/null || true
 sleep 3
-W0=$(webkit_rss)
-echo "WebKit RSS baseline (TB quit): $((W0/1024)) MB"
+BEFORE=$(webkit_pids)            # WebKit processes that already exist (e.g. Safari)
 ./$APP "${URLS[@]}" >/dev/null 2>&1 &
 TBPID=$!
 echo "launched pid $TBPID with ${#URLS[@]} tabs; waiting ${WAIT}s..."
 sleep $WAIT
-W1=$(webkit_rss)
-APPRSS=$(ps -o rss= -p $TBPID | tr -d ' ')
-TB_WEBKIT=$((W1-W0))
+set +e                           # ps may fail if the app exited; don't abort the run
+AFTER=$(webkit_pids)
+NEW_WEBKIT=$(comm -13 <(echo "$BEFORE") <(echo "$AFTER"))   # only TB's new WebKit procs
+TB_WEBKIT=$(rss_of_pids "$NEW_WEBKIT")
+APPRSS=$(ps -o rss= -p $TBPID 2>/dev/null | tr -d ' '); APPRSS=${APPRSS:-0}
 TB_TOTAL=$((TB_WEBKIT+APPRSS))
-WC=$(proc_count "com.apple.WebKit.WebContent")
-echo "WebKit RSS running: $((W1/1024)) MB | delta(TB WebKit): $((TB_WEBKIT/1024)) MB | app: $((APPRSS/1024)) MB"
-echo "WebContent processes (system-wide, incl Safari): $WC"
-echo "==> TrailBrowser total (delta WebKit + app): $((TB_TOTAL/1024)) MB"
+set -e
+echo "TB WebKit procs: $(echo "$NEW_WEBKIT" | grep -c . ) | WebKit RSS: $((TB_WEBKIT/1024)) MB | app: $((APPRSS/1024)) MB"
+echo "==> TrailBrowser total (app + its WebKit processes): $((TB_TOTAL/1024)) MB"
 pkill -f "$APP" 2>/dev/null || true
 sleep 2
 
