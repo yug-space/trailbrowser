@@ -30,7 +30,8 @@ npx remotion render src/index.tsx TrailBrowserExplainer out/trailbrowser.mp4
 1. **Intro** — animated logo lockup: the brand mark's trail draws itself,
    waypoints pop, the summit ignites, then the wordmark + tagline slide in
 2. **Memory** — ~1/10th of Chrome's resident memory (animated bars)
-3. **AI** — Ask / Edit / Search via Codex or Claude on a redacted snapshot
+3. **AI** — Ask / Edit / Search via your local `codex` or `claude` CLI
+   (shown as on-device, read-only engine chips) on a redacted snapshot
 4. **Memory MCP** — read-only history MCP server + its five tools
 5. **Outro** — `make && open TrailBrowser.app`
 

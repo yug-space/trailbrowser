@@ -327,6 +327,21 @@ const SkeletonLine: React.FC<{ i: number }> = ({ i }) => {
   return <div style={{ height: 14, background: palette.textFaint, borderRadius: 6, margin: "10px 0", width: `${(90 - i * 6) * s}%`, opacity: 0.4 }} />;
 };
 
+const EngineChip: React.FC<{ name: string; cmd: string; tag: string; delay: number }> = ({ name, cmd, tag, delay }) => {
+  const frame = useCurrentFrame();
+  const glow = 6 + pulse(frame, 9) * 10;
+  return (
+    <Pop delay={delay} from={0.85}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: palette.surfaceHi, border: `1px solid ${palette.border}`, borderRadius: 12, padding: "11px 16px", boxShadow: `0 0 ${glow}px rgba(247,107,28,0.18)` }}>
+        <span style={{ color: palette.accent, fontFamily: monoFont, fontSize: 16 }}>$</span>
+        <span style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 20, color: palette.text }}>{name}</span>
+        <span style={{ fontFamily: monoFont, fontSize: 15, color: palette.textFaint }}>{cmd}</span>
+        <span style={{ fontFamily: monoFont, fontSize: 12, color: palette.accent, background: palette.accentSoft, border: `1px solid ${palette.accent}`, borderRadius: 6, padding: "2px 8px" }}>{tag}</span>
+      </div>
+    </Pop>
+  );
+};
+
 const AIScene: React.FC = () => {
   const frame = useCurrentFrame();
   const q = "Summarize this page in one line.";
@@ -338,7 +353,7 @@ const AIScene: React.FC = () => {
       <Backdrop glowX={70} />
       <SceneHeading eyebrow="AI, in the page" title={<>Ask. Edit. <span style={{ color: palette.accent }}>Search.</span></>} />
       <Pop delay={4} from={0.9} style={{ alignSelf: "center" }}>
-        <BrowserChrome url="https://news.ycombinator.com" height={440} width={1100}>
+        <BrowserChrome url="https://news.ycombinator.com" height={400} width={1100}>
           <AbsoluteFill style={{ opacity: 0.18, padding: 40 }}>
             {Array.from({ length: 9 }).map((_, i) => <SkeletonLine key={i} i={i} />)}
           </AbsoluteFill>
@@ -356,11 +371,17 @@ const AIScene: React.FC = () => {
           </div>
         </BrowserChrome>
       </Pop>
-      <Rise delay={60}>
-        <div style={{ marginTop: 30, textAlign: "center", fontFamily: monoFont, fontSize: 20, color: palette.textDim }}>
-          Powered by Codex or Claude — reading a redacted snapshot, never your secrets.
+      <div style={{ marginTop: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", gap: 16 }}>
+          <EngineChip name="Codex" cmd="codex exec --sandbox read-only" tag="default" delay={56} />
+          <EngineChip name="Claude" cmd="claude -p" tag="Claude Code" delay={62} />
         </div>
-      </Rise>
+        <Rise delay={70}>
+          <div style={{ textAlign: "center", fontFamily: monoFont, fontSize: 19, color: palette.textDim }}>
+            Runs your local codex or claude CLI — on your Mac, read-only, never your secrets.
+          </div>
+        </Rise>
+      </div>
     </AbsoluteFill>
   );
 };
