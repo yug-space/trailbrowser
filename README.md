@@ -1,40 +1,36 @@
 # TrailBrowser
 
-A small native browser shell for macOS and Linux.
+A small, fast, native **macOS** browser shell built on Apple's system WebKit
+engine — no Electron, no bundled Chromium.
 
-TrailBrowser uses the native UI toolkit on each platform and a system WebKit
-engine for rendering:
+- Objective-C + AppKit for the native window, toolbar, and sidebar
+- `WKWebView` (system WebKit) for real website rendering
 
-- macOS: Objective-C, AppKit, Apple WebKit
-- Linux: C, GTK, WebKitGTK
+The app is the native UI *around* WebKit; it is not a rendering engine.
 
-This gives you real website rendering without Electron or a bundled Chromium
-runtime.
-
-The app includes:
+## Features
 
 - A flat, near-black UI with a warm-orange accent and smooth control animations
-- A centered address/search bar with back, forward, reload, and stop controls
+- A clean one-line top bar: highlighted sidebar toggle, centered address/search
+  pill, reload, **Ask**, and a settings gear
 - A native **home page** with a Google ⇄ AI search toggle and quick links
+- **First-run onboarding** that offers to sync cookies from Chrome
 - A **settings page** (`Cmd+,`) for syncing Chrome cookies and more
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
   slept), and hover-to-close
-- Low-memory tab sleeping on macOS: inactive sidebar tabs keep URL/title
-  metadata and release their WebKit view
+- **Efficient memory & process use:** a single shared web-content process pool
+  and one shared cookie/data store across tabs; inactive tabs release their
+  `WKWebView` (keeping only URL/title/favicon), so dozens of open tabs cost
+  roughly one live WebKit page
 - A built-in **page assistant** (Ask / Edit) powered by the `codex` CLI
-- A 2px accent loading bar and a status pill
-- WebKit rendering for modern websites with HTML, CSS, JavaScript, images,
-  history, and navigation
-- macOS keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`, `Cmd+B`,
-  `Cmd+,`, `Cmd+[`, and `Cmd+]`
-- Optional, user-initiated **cookie import from Google Chrome** on macOS
+- A 2px accent loading bar and a status dot
+- Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`, `Cmd+B`, `Cmd+,`,
+  `Cmd+[`, `Cmd+]`
+- A read-only **history MCP server** for querying your browsing history
 
-## Files
+## Repository layout
 
-The macOS app is split into focused source files (see [AGENTS.md](AGENTS.md)
-for the full architecture):
-
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
 | `mac-browser/main.m` | `NSApplication` entry point |
 | `mac-browser/BrowserAppDelegate.{h,m}` | App controller: window, tabs, navigation, assistant, history, cookies |
@@ -43,95 +39,49 @@ for the full architecture):
 | `mac-browser/TBControls.{h,m}` | Themed controls (flat buttons, pill button, progress bar, field) |
 | `mac-browser/TBTheme.{h,m}` | Color palette + layer animation helper |
 | `mac-browser/ChromeCookieImporter.{h,m}` | Imports cookies from a local Chrome profile |
-| `mac-browser/home/` | Bundled internal pages: `Home.*` and `Settings.*` |
+| `mac-browser/home/` | Bundled internal pages: `Home.*`, `Settings.*`, `Onboarding.*` |
 | `mac-browser/Info.plist` | macOS app bundle metadata |
-| `linux-browser/trailbrowser.c` | Lightweight C/GTK/WebKitGTK Linux browser app |
 | `mcp-history-server/server.mjs` | Read-only MCP server for TrailBrowser history |
-| `Makefile` | Builds the native app for macOS or Linux |
+| `Makefile` | Builds the app and runs the MCP server |
 
-## Documentation
+See [AGENTS.md](AGENTS.md) for architecture and conventions, and
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to build and test.
 
-- [AGENTS.md](AGENTS.md) — architecture, file map, conventions, and gotchas
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, style, and test changes
-- [LICENSE](LICENSE) — MIT
+## Build & run
 
-## Build
-
-On macOS:
+Requires the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
-make
-```
-
-This creates:
-
-```text
-TrailBrowser.app
-```
-
-On Debian/Ubuntu Linux, install native dependencies first:
-
-```sh
-sudo apt update
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-```
-
-Then build:
-
-```sh
-make
-```
-
-This creates:
-
-```text
-./trailbrowser
-```
-
-If your distro still ships WebKitGTK as `webkit2gtk-4.0`, install
-`libwebkit2gtk-4.0-dev` instead; the Makefile checks for `4.1` first, then
-falls back to `4.0`.
-
-## Run
-
-```sh
+make            # builds TrailBrowser.app
 make run-browser
-```
-
-Or:
-
-```sh
-open TrailBrowser.app
-```
-
-On Linux:
-
-```sh
-./trailbrowser
-```
-
-Type in the top address bar and press Return. TrailBrowser only decides after
-Return: full URLs and domain-like inputs open as websites, while phrases become
-Google searches.
-
-## Clean
-
-```sh
 make clean
 ```
 
+Type in the top address bar and press Return: full URLs and domain-like inputs
+open as websites, while phrases become Google searches. The home page's Google ⇄
+AI toggle chooses between a normal search and Codex Deep Search.
+
+## Internal pages
+
+TrailBrowser serves a few native pages via the `trailbrowser://` scheme:
+
+- `trailbrowser://home` — search and quick links
+- `trailbrowser://settings` — sync Chrome cookies and more
+- `trailbrowser://welcome` — first-run onboarding
+
 ## Import Cookies from Chrome
 
-On macOS, TrailBrowser → **Import Cookies from Chrome…** copies cookies from a local
-Google Chrome profile into TrailBrowser's own WebKit cookie store, so sites you
-were signed in to in Chrome stay signed in here. This is the same kind of
-"import from another browser" migration that Safari, Edge, Arc, and Brave ship.
+Settings → **Sync Chrome Cookies** (or TrailBrowser → Import Cookies from Chrome…)
+copies cookies from a local Google Chrome profile into TrailBrowser's shared
+WebKit cookie store, so sites you were signed in to in Chrome stay signed in
+here. It also reduces "unusual traffic" checks from sites like Google that
+distrust signed-out, cookieless sessions.
 
 How it works:
 
 1. Lists the Chrome profiles under
-   `~/Library/Application Support/Google/Chrome` (and their account emails from
-   `Local State`). If you have more than one profile, you choose which to import.
+   `~/Library/Application Support/Google/Chrome` (and their account emails). If
+   you have more than one profile, you choose which to import.
 2. Reads the AES key from the `Chrome Safe Storage` Keychain item. macOS shows a
    consent prompt the first time — this is the gate that keeps the import
    user-authorized.
@@ -140,11 +90,7 @@ How it works:
    into `WKHTTPCookieStore`.
 
 It only ever touches the current user's own Chrome data on this machine, never
-sends cookies anywhere, and deletes the temporary database copy when done. The
-import is entirely manual — nothing is read until you invoke the menu item.
-
-The Linux build does not import Chrome cookies. It keeps the Linux binary small
-and avoids pulling browser-profile migration code into the GTK shell.
+sends cookies anywhere, and deletes the temporary database copy when done.
 
 ## History MCP Server
 
@@ -152,12 +98,6 @@ TrailBrowser writes its own browsing history to:
 
 ```text
 ~/Library/Application Support/TrailBrowser/history.jsonl
-```
-
-On Linux, history is stored at:
-
-```text
-${XDG_DATA_HOME:-~/.local/share}/trailbrowser/history.jsonl
 ```
 
 The MCP server reads that file and exposes read-only tools:
@@ -168,32 +108,20 @@ The MCP server reads that file and exposes read-only tools:
 - `history_by_domain`
 - `history_top_domains`
 
-Install dependencies:
-
 ```sh
-make mcp-install
-```
-
-Run the MCP server over stdio:
-
-```sh
-make run-history-mcp
+make mcp-install     # install dependencies
+make run-history-mcp # run the server over stdio
 ```
 
 The MCP server is strictly read-only over `history.jsonl`: it does **not** read
 Chrome profiles, decrypt Keychain data, read cookies, or expose session cookies.
-Cookie handling lives entirely in the browser app's user-initiated Chrome import
-(above); imported cookies stay inside WebKit's own cookie store and are never
-written to `history.jsonl` or surfaced through MCP.
+URLs are redacted for sensitive query keys before being written to history.
 
-## How It Works
+## How it works
 
-On macOS, `main()` starts an `NSApplication` and installs `BrowserAppDelegate` as the app
-delegate.
-
-When macOS finishes launching the app, `applicationDidFinishLaunching:` runs.
-That method creates the menu, builds the browser window, and opens the native
-home page (`trailbrowser://home`).
+`main()` starts an `NSApplication` and installs `BrowserAppDelegate`. On launch
+the delegate builds the menu and window, then opens the onboarding page on first
+run or the home page afterwards.
 
 The UI is native AppKit, themed near-black with a warm-orange accent
 (`TBTheme`):
@@ -205,23 +133,16 @@ The UI is native AppKit, themed near-black with a warm-orange accent
 - `TBProgressBar` shows page load progress as a 2px accent line.
 - `NSTableView` with `BrowserTabViews` renders the sidebar tab list.
 
-The web page itself is rendered by WebKit:
+The web page itself is rendered by WebKit: `WKWebView` displays the site;
+`loadRequest:`, `goBack`, `goForward`, and `reload` drive navigation; and
+key-value observing tracks `estimatedProgress`, `URL`, `canGoBack`, and
+`canGoForward` so the UI stays in sync. All web views share one
+`WKProcessPool` and the default `WKWebsiteDataStore`, and inactive tabs are
+slept to keep memory close to a single live WebKit page.
 
-- `WKWebView` displays the website.
-- `loadRequest:` loads a URL.
-- `goBack`, `goForward`, and `reload` control navigation.
-- Key-value observing tracks `estimatedProgress`, `URL`, `canGoBack`, and
-  `canGoForward` so the UI stays in sync.
-- Finished navigations append redacted history entries to `history.jsonl`.
-- The MCP server reads `history.jsonl` and exposes safe browsing-history lookup
-  tools to MCP clients.
-- Inactive macOS sidebar tabs are slept to keep memory close to one active
-  WebKit page instead of one live WebKit instance per tab.
+This is a native browser shell, not a custom browser engine. WebKit handles
+parsing HTML, applying CSS, running JavaScript, loading images, and navigation.
 
-On Linux, `linux-browser/trailbrowser.c` does the same job with GTK widgets and
-`WebKitWebView` from WebKitGTK. It writes history to the XDG data directory and
-uses the same URL-vs-search rules as the macOS address bar.
+## License
 
-This is a native browser shell, not a custom browser engine. WebKit handles the
-browser engine work: parsing HTML, applying CSS, running JavaScript, loading
-images, handling links, and maintaining navigation history.
+[MIT](LICENSE)

@@ -4,15 +4,15 @@ Guidance for AI coding agents (and humans) working in the TrailBrowser repo.
 
 ## What this project is
 
-TrailBrowser is a small **native** browser shell built on the system WebKit
-engine — no Electron, no bundled Chromium.
+TrailBrowser is a small **native macOS** browser shell built on the system
+WebKit engine — no Electron, no bundled Chromium.
 
-- **macOS** — Objective-C + AppKit + WebKit (`WKWebView`). This is the primary,
-  full-featured target (sidebar tabs, page assistant, cookie import, settings).
-- **Linux** — C + GTK 3 + WebKitGTK. A lighter single-window shell.
+- **mac-browser** — Objective-C + AppKit + WebKit (`WKWebView`): sidebar tabs,
+  page assistant, cookie import, settings, onboarding.
 - **mcp-history-server** — a read-only Node MCP server exposing browsing history.
 
-The app is the native UI *around* WebKit; it is not a rendering engine.
+The app is the native UI *around* WebKit; it is not a rendering engine. (There
+is intentionally no Linux/GTK build — the repo is macOS + MCP only.)
 
 ## Repository layout
 

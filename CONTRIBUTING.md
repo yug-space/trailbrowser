@@ -5,7 +5,6 @@ the system WebKit engine (AppKit/WebKit on macOS, GTK/WebKitGTK on Linux).
 
 ## Getting set up
 
-### macOS
 Requires the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
@@ -13,15 +12,8 @@ make            # builds TrailBrowser.app
 make run-browser
 ```
 
-### Linux (Debian/Ubuntu)
-```sh
-sudo apt update
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-make            # builds ./trailbrowser
-make run-browser
-```
+History MCP server:
 
-### History MCP server
 ```sh
 make mcp-install
 make run-history-mcp
@@ -37,7 +29,6 @@ In short:
   `BrowserTabViews.{h,m}` (sidebar list), `TBControls.{h,m}` + `TBTheme.{h,m}`
   (themed controls + palette), `ChromeCookieImporter.{h,m}`, and bundled pages
   under `home/`.
-- `linux-browser/trailbrowser.c` — the GTK app.
 - `mcp-history-server/` — the read-only history MCP server.
 
 ## Coding style
