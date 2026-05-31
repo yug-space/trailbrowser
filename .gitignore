@@ -1,9 +1,6 @@
 # Generated app bundle
 TrailBrowser.app
 
-# Linux binary
-trailbrowser
-
 # Node dependencies
 node_modules
 
