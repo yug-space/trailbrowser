@@ -8,7 +8,14 @@
 #import "TBControls.h"
 #import "TBTheme.h"
 
+@interface BrowserAppDelegate ()
+@property (nonatomic, assign) NSInteger tabActivationCounter;
+@property (nonatomic, strong) dispatch_source_t memoryPressureSource;
+@end
+
 @implementation BrowserAppDelegate
+
+static const NSInteger kMaxLiveTabs = 6;
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -21,6 +28,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self buildMenu];
     [self buildWindow];
     [self writeBrowserStateRunning:YES];
+    [self startMemoryPressureMonitor];
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     BOOL onboarded = [defaults boolForKey:@"TBHasOnboarded"];
@@ -736,6 +744,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantPromptField.bordered = NO;
     self.assistantPromptField.drawsBackground = NO;
     self.assistantPromptField.focusRingType = NSFocusRingTypeNone;
+    self.assistantPromptField.usesSingleLineMode = YES;
+    self.assistantPromptField.cell.usesSingleLineMode = YES;
+    self.assistantPromptField.cell.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self.assistantPromptField.cell setScrollable:YES];
     self.assistantPromptField.textColor = TBText();
     self.assistantPromptField.placeholderAttributedString =
         [[NSAttributedString alloc] initWithString:@"Ask about this page"
@@ -828,7 +840,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.assistantPromptField.leadingAnchor constraintEqualToAnchor:self.assistantModeControl.trailingAnchor constant:12.0],
         [self.assistantPromptField.trailingAnchor constraintEqualToAnchor:self.assistantCollapseButton.leadingAnchor constant:-12.0],
         [self.assistantPromptField.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
-        [self.assistantPromptField.heightAnchor constraintEqualToConstant:30.0],
 
         [self.assistantSpinner.trailingAnchor constraintEqualToAnchor:self.assistantCollapseButton.leadingAnchor constant:-8.0],
         [self.assistantSpinner.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
@@ -962,8 +973,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)sleepTabAtIndex:(NSInteger)index {
     if (index < 0 || index >= (NSInteger)self.tabs.count) return;
+    [self sleepTab:self.tabs[(NSUInteger)index]];
+}
 
-    BrowserTab *tab = self.tabs[(NSUInteger)index];
+- (void)sleepTab:(BrowserTab *)tab {
     WKWebView *webView = tab.webView;
     if (!webView) return;
 
@@ -976,20 +989,61 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     tab.webView = nil;
 }
 
+- (void)startMemoryPressureMonitor {
+    dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE,
+                                                      0,
+                                                      DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL,
+                                                      dispatch_get_main_queue());
+    __weak BrowserAppDelegate *weakSelf = self;
+    dispatch_source_set_event_handler(source, ^{
+        [weakSelf sleepAllInactiveTabs];
+    });
+    dispatch_resume(source);
+    self.memoryPressureSource = source;
+}
+
+- (void)sleepAllInactiveTabs {
+    BrowserTab *active = [self activeTab];
+    for (BrowserTab *tab in self.tabs) {
+        if (tab != active && tab.webView) [self sleepTab:tab];
+    }
+    if (self.tabs.count > 0) {
+        NSIndexSet *rows = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.tabs.count)];
+        [self.tabTable reloadDataForRowIndexes:rows columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+    }
+}
+
+- (void)enforceLiveTabBudget {
+    NSMutableArray<BrowserTab *> *live = [NSMutableArray array];
+    for (BrowserTab *tab in self.tabs) {
+        if (tab.webView && tab != [self activeTab]) [live addObject:tab];
+    }
+    if ((NSInteger)live.count <= kMaxLiveTabs - 1) return;
+
+    [live sortUsingComparator:^NSComparisonResult(BrowserTab *a, BrowserTab *b) {
+        if (a.lastActiveSeq < b.lastActiveSeq) return NSOrderedAscending;
+        if (a.lastActiveSeq > b.lastActiveSeq) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+
+    NSInteger excess = (NSInteger)live.count - (kMaxLiveTabs - 1);
+    for (NSInteger i = 0; i < excess; i++) {
+        [self sleepTab:live[(NSUInteger)i]];
+    }
+}
+
 - (void)selectTabAtIndex:(NSInteger)index {
     if (index < 0 || index >= (NSInteger)self.tabs.count) return;
     if (index == self.activeTabIndex && self.webView == self.tabs[(NSUInteger)index].webView) return;
 
-    NSInteger previousIndex = self.activeTabIndex;
     self.webView.hidden = YES;
     self.activeTabIndex = index;
     BrowserTab *tab = [self activeTab];
+    tab.lastActiveSeq = ++self.tabActivationCounter;
     self.webView = [self ensureWebViewForTab:tab];
     self.webView.hidden = NO;
 
-    if (previousIndex >= 0 && previousIndex != index) {
-        [self sleepTabAtIndex:previousIndex];
-    }
+    [self enforceLiveTabBudget];
 
     NSIndexSet *selection = [NSIndexSet indexSetWithIndex:(NSUInteger)index];
     [self.tabTable selectRowIndexes:selection byExtendingSelection:NO];

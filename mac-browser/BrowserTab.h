@@ -11,6 +11,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, nullable) NSImage *favicon;
 @property (nonatomic, copy, nullable) NSString *faviconURLString;
 @property (nonatomic, copy, nullable) NSString *pendingFaviconURLString;
+@property (nonatomic, assign) NSInteger lastActiveSeq;
 @end
 
 NS_ASSUME_NONNULL_END
