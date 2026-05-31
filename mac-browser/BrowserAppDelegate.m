@@ -489,11 +489,33 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     [self updateTabCount];
     [self updateControls];
+    self.window.delegate = self;
     self.window.initialFirstResponder = self.addressField;
     [self.window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
+    [self positionTrafficLights];
 
     [self.window makeFirstResponder:self.addressField];
+}
+
+- (void)positionTrafficLights {
+    NSButton *close = [self.window standardWindowButton:NSWindowCloseButton];
+    NSButton *minimize = [self.window standardWindowButton:NSWindowMiniaturizeButton];
+    NSButton *zoom = [self.window standardWindowButton:NSWindowZoomButton];
+    if (!close || !close.superview) return;
+
+    CGFloat toolbarHeight = 46.0;
+    CGFloat titleBarHeight = NSHeight(close.superview.frame);
+    for (NSButton *button in @[ close, minimize, zoom ]) {
+        NSRect frame = button.frame;
+        frame.origin.y = titleBarHeight - toolbarHeight / 2.0 - NSHeight(frame) / 2.0;
+        [button setFrameOrigin:frame.origin];
+    }
+}
+
+- (void)windowDidResize:(NSNotification *)notification {
+    (void)notification;
+    [self positionTrafficLights];
 }
 
 - (NSView *)hairlineView {
@@ -790,28 +812,28 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.assistantBar.widthAnchor constraintGreaterThanOrEqualToConstant:620.0],
         [self.assistantBar.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.webContainer.leadingAnchor constant:28.0],
         [self.assistantBar.trailingAnchor constraintLessThanOrEqualToAnchor:self.webContainer.trailingAnchor constant:-28.0],
-        [self.assistantBar.heightAnchor constraintEqualToConstant:48.0],
+        [self.assistantBar.heightAnchor constraintEqualToConstant:46.0],
 
-        [self.assistantModeControl.leadingAnchor constraintEqualToAnchor:self.assistantBar.leadingAnchor constant:10.0],
+        [self.assistantModeControl.leadingAnchor constraintEqualToAnchor:self.assistantBar.leadingAnchor constant:8.0],
         [self.assistantModeControl.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
         [self.assistantModeControl.widthAnchor constraintEqualToConstant:108.0],
-        [self.assistantModeControl.heightAnchor constraintEqualToConstant:28.0],
+        [self.assistantModeControl.heightAnchor constraintEqualToConstant:30.0],
 
-        [self.assistantPromptField.leadingAnchor constraintEqualToAnchor:self.assistantModeControl.trailingAnchor constant:10.0],
+        [self.assistantRunButton.trailingAnchor constraintEqualToAnchor:self.assistantBar.trailingAnchor constant:-10.0],
+        [self.assistantRunButton.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
+
+        [self.assistantCollapseButton.trailingAnchor constraintEqualToAnchor:self.assistantRunButton.leadingAnchor constant:-8.0],
+        [self.assistantCollapseButton.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
+
+        [self.assistantPromptField.leadingAnchor constraintEqualToAnchor:self.assistantModeControl.trailingAnchor constant:12.0],
+        [self.assistantPromptField.trailingAnchor constraintEqualToAnchor:self.assistantCollapseButton.leadingAnchor constant:-12.0],
         [self.assistantPromptField.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
         [self.assistantPromptField.heightAnchor constraintEqualToConstant:30.0],
 
-        [self.assistantSpinner.leadingAnchor constraintEqualToAnchor:self.assistantPromptField.trailingAnchor constant:8.0],
+        [self.assistantSpinner.trailingAnchor constraintEqualToAnchor:self.assistantCollapseButton.leadingAnchor constant:-8.0],
         [self.assistantSpinner.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
         [self.assistantSpinner.widthAnchor constraintEqualToConstant:18.0],
         [self.assistantSpinner.heightAnchor constraintEqualToConstant:18.0],
-
-        [self.assistantCollapseButton.leadingAnchor constraintEqualToAnchor:self.assistantSpinner.trailingAnchor constant:8.0],
-        [self.assistantCollapseButton.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
-
-        [self.assistantRunButton.leadingAnchor constraintEqualToAnchor:self.assistantCollapseButton.trailingAnchor constant:8.0],
-        [self.assistantRunButton.trailingAnchor constraintEqualToAnchor:self.assistantBar.trailingAnchor constant:-10.0],
-        [self.assistantRunButton.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
 
         [self.assistantResultPanel.centerXAnchor constraintEqualToAnchor:self.assistantBar.centerXAnchor],
         [self.assistantResultPanel.widthAnchor constraintEqualToAnchor:self.assistantBar.widthAnchor],
@@ -1901,8 +1923,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         NSString *modelFlag = model.length > 0
             ? [NSString stringWithFormat:@"--model %@ ", [self shellQuotedString:model]]
             : @"";
-        // Claude prints the answer to stdout (captured in the log), so no
-        // --output-last-message file; the prompt is piped in on stdin.
+
         command = [pathSetup stringByAppendingFormat:@"claude -p %@--output-format text", modelFlag];
     } else {
         NSString *searchFlag = enableSearch ? @"--search " : @"";

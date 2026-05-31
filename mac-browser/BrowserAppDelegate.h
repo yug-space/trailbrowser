@@ -6,7 +6,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface BrowserAppDelegate : NSObject <NSApplicationDelegate, NSTextFieldDelegate, WKNavigationDelegate, WKUIDelegate, NSTableViewDataSource, NSTableViewDelegate>
+@interface BrowserAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, WKNavigationDelegate, WKUIDelegate, NSTableViewDataSource, NSTableViewDelegate>
 @property (nonatomic, strong) NSWindow *window;
 @property (nonatomic, strong, nullable) WKWebView *webView;
 @property (nonatomic, strong) NSView *webContainer;
