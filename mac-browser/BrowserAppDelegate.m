@@ -350,22 +350,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     tabScrollView.drawsBackground = NO;
     [self.sidebar addSubview:tabScrollView];
 
-    NSTextField *shortcutsTitle = [self sectionHeaderLabel:@"SHORTCUTS"];
-    [self.sidebar addSubview:shortcutsTitle];
-
-    NSStackView *shortcuts = [NSStackView stackViewWithViews:@[
-        [self shortcutRowWithLabel:@"Google" url:@"google.com"],
-        [self shortcutRowWithLabel:@"YouTube" url:@"youtube.com"],
-        [self shortcutRowWithLabel:@"GitHub" url:@"github.com"],
-        [self shortcutRowWithLabel:@"Hacker News" url:@"news.ycombinator.com"]
-    ]];
-    shortcuts.translatesAutoresizingMaskIntoConstraints = NO;
-    shortcuts.orientation = NSUserInterfaceLayoutOrientationVertical;
-    shortcuts.alignment = NSLayoutAttributeLeading;
-    shortcuts.distribution = NSStackViewDistributionFill;
-    shortcuts.spacing = 1.0;
-    [self.sidebar addSubview:shortcuts];
-
     NSView *settingsDivider = [self hairlineView];
     [self.sidebar addSubview:settingsDivider];
 
@@ -492,14 +476,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [tabScrollView.topAnchor constraintEqualToAnchor:tabHeader.bottomAnchor constant:6.0],
         [tabScrollView.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:8.0],
         [tabScrollView.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-8.0],
-        [tabScrollView.bottomAnchor constraintEqualToAnchor:shortcutsTitle.topAnchor constant:-10.0],
-
-        [shortcutsTitle.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:18.0],
-        [shortcutsTitle.bottomAnchor constraintEqualToAnchor:shortcuts.topAnchor constant:-8.0],
-
-        [shortcuts.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:16.0],
-        [shortcuts.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-12.0],
-        [shortcuts.bottomAnchor constraintEqualToAnchor:settingsDivider.topAnchor constant:-12.0],
+        [tabScrollView.bottomAnchor constraintEqualToAnchor:settingsDivider.topAnchor constant:-10.0],
 
         [settingsDivider.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:12.0],
         [settingsDivider.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-12.0],
@@ -597,45 +574,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [button.heightAnchor constraintEqualToConstant:34.0].active = YES;
     [button.widthAnchor constraintGreaterThanOrEqualToConstant:200.0].active = YES;
     return button;
-}
-
-- (TBFlatButton *)shortcutRowWithLabel:(NSString *)label url:(NSString *)url {
-    TBFlatButton *row = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
-    row.translatesAutoresizingMaskIntoConstraints = NO;
-    row.cornerRadius = 7.0;
-    row.target = self;
-    row.action = @selector(openShortcut:);
-    row.identifier = url;
-    row.toolTip = url;
-    row.imagePosition = NSImageLeft;
-    row.imageScaling = NSImageScaleProportionallyDown;
-    row.imageHugsTitle = YES;
-    row.alignment = NSTextAlignmentLeft;
-
-    if (@available(macOS 11.0, *)) {
-        NSImage *image = [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:label];
-        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:11.0
-                                                                                             weight:NSFontWeightMedium];
-        image = [image imageWithSymbolConfiguration:config] ?: image;
-        image.template = YES;
-        row.image = image;
-    }
-    if (@available(macOS 10.14, *)) row.contentTintColor = TBFaint();
-
-    row.attributedTitle = [[NSAttributedString alloc] initWithString:[@"   " stringByAppendingString:label]
-                                                          attributes:@{
-        NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium],
-        NSForegroundColorAttributeName: TBMuted()
-    }];
-
-    [row.heightAnchor constraintEqualToConstant:30.0].active = YES;
-    [row.widthAnchor constraintGreaterThanOrEqualToConstant:160.0].active = YES;
-    return row;
-}
-
-- (void)openShortcut:(id)sender {
-    NSString *url = [sender identifier];
-    if (url.length > 0) [self loadURLString:url];
 }
 
 - (void)updateTabCount {
