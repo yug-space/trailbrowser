@@ -1694,6 +1694,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 }
 
+- (void)clearAssistantPromptField {
+    self.assistantPromptField.stringValue = @"";
+    NSText *editor = [self.assistantPromptField currentEditor];
+    if (editor) editor.string = @"";
+}
+
 - (void)showAssistantMessage:(NSString *)message {
     [self openAssistant:nil];
     self.assistantResultPanel.hidden = NO;
@@ -1793,7 +1799,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
          "User query:\n%@\n",
         trimmed];
 
-    [self runAIWithPrompt:prompt enableSearch:YES completion:^(NSString *output, NSError *error) {
+    [self runAIWithPrompt:prompt enableSearch:YES effortOverride:@"minimal" completion:^(NSString *output, NSError *error) {
         if (error) {
             [self setStatusText:error.localizedDescription ?: @"Failed"];
             [self.webView loadHTMLString:[self statusPageHTMLForQuery:trimmed
@@ -1827,10 +1833,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 
     BOOL editMode = self.assistantModeControl.selectedIndex == 1;
-    self.assistantPromptField.stringValue = @"";
+    [self clearAssistantPromptField];
     [self setAssistantWorking:YES];
-    [self showAssistantMessage:editMode ? @"Codex is preparing a structured page update..."
-                                   : @"Codex is reading the page and writing an answer..."];
+    if (!editMode) {
+        [self showAssistantMessage:@"Codex is reading the page and writing an answer..."];
+    }
 
     [self pageSnapshotWithCompletion:^(NSString *snapshot, NSError *snapshotError) {
         if (snapshotError) {
@@ -1954,6 +1961,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)runAIWithPrompt:(NSString *)prompt
            enableSearch:(BOOL)enableSearch
              completion:(void (^)(NSString *output, NSError *error))completion {
+    [self runAIWithPrompt:prompt enableSearch:enableSearch effortOverride:nil completion:completion];
+}
+
+- (void)runAIWithPrompt:(NSString *)prompt
+           enableSearch:(BOOL)enableSearch
+         effortOverride:(NSString *)effortOverride
+             completion:(void (^)(NSString *output, NSError *error))completion {
     NSString *supportPath = [self supportDirectoryPath];
     NSString *uuid = NSUUID.UUID.UUIDString;
     NSString *outputPath = [supportPath stringByAppendingPathComponent:
@@ -1986,7 +2000,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             ? [NSString stringWithFormat:@"-m %@ ", [self shellQuotedString:model]]
             : @"";
         NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
-        if (effort.length == 0) effort = @"low";
+        if (effort.length == 0) effort = effortOverride.length > 0 ? effortOverride : @"low";
         NSString *effortFlag = [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ",
                                 [self shellQuotedString:effort]];
         command = [pathSetup stringByAppendingFormat:
@@ -2173,9 +2187,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         (void)result;
         if (error) {
             [self showAssistantMessage:error.localizedDescription ?: @"Could not apply page edit."];
-            return;
         }
-        [self showAssistantMessage:@"Applied page edit."];
     }];
 }
 
