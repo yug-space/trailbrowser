@@ -43,7 +43,7 @@ function setPref(key, value) {
 const engine = window.__tbEngine || "codex";
 engineSelect.value = engine;
 renderModels(engine);
-speedSelect.value = window.__tbEffort || "low";
+speedSelect.value = window.__tbEffort || "minimal";
 
 engineSelect.addEventListener("change", () => {
   setPref("aiEngine", engineSelect.value);
