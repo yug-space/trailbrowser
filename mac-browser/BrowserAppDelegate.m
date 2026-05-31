@@ -1196,7 +1196,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if ([host isEqualToString:@"set-pref"]) {
         NSString *key = [self queryValueNamed:@"key" inURL:url];
         NSString *value = [self queryValueNamed:@"value" inURL:url];
-        NSDictionary<NSString *, NSString *> *allowed = @{ @"codexModel": @"TBCodexModel",
+        NSDictionary<NSString *, NSString *> *allowed = @{ @"aiEngine": @"TBAIEngine",
+                                                           @"codexModel": @"TBCodexModel",
+                                                           @"claudeModel": @"TBClaudeModel",
                                                            @"codexEffort": @"TBCodexEffort" };
         NSString *defaultsKey = allowed[key];
         if (defaultsKey) {
@@ -1240,11 +1242,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self setStatusText:@"Ready"];
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *model = [defaults stringForKey:@"TBCodexModel"] ?: @"";
+    NSString *engine = [defaults stringForKey:@"TBAIEngine"] ?: @"codex";
+    NSString *codexModel = [defaults stringForKey:@"TBCodexModel"] ?: @"";
+    NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
     NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
     NSString *prefs = [NSString stringWithFormat:
-        @"<script>window.__tbModel=\"%@\";window.__tbEffort=\"%@\";</script></head>",
-        model, effort];
+        @"<script>window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
+         "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";</script></head>",
+        engine, codexModel, claudeModel, effort];
     NSString *html = [[self nativeResourceHTMLNamed:@"Settings"]
                       stringByReplacingOccurrencesOfString:@"</head>" withString:prefs];
 
@@ -1712,7 +1717,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
          "User query:\n%@\n",
         trimmed];
 
-    [self runCodexWithPrompt:prompt enableSearch:YES completion:^(NSString *output, NSError *error) {
+    [self runAIWithPrompt:prompt enableSearch:YES completion:^(NSString *output, NSError *error) {
         if (error) {
             [self setStatusText:error.localizedDescription ?: @"Failed"];
             [self.webView loadHTMLString:[self statusPageHTMLForQuery:trimmed
@@ -1761,7 +1766,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         NSString *prompt = [self codexPromptForRequest:request
                                               snapshot:snapshot
                                               editMode:editMode];
-        [self runCodexWithPrompt:prompt enableSearch:NO completion:^(NSString *output, NSError *codexError) {
+        [self runAIWithPrompt:prompt enableSearch:NO completion:^(NSString *output, NSError *codexError) {
             [self setAssistantWorking:NO];
             if (codexError) {
                 [self showAssistantMessage:codexError.localizedDescription];
@@ -1870,9 +1875,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     return [NSString stringWithFormat:@"'%@'", escaped];
 }
 
-- (void)runCodexWithPrompt:(NSString *)prompt
-              enableSearch:(BOOL)enableSearch
-                completion:(void (^)(NSString *output, NSError *error))completion {
+- (void)runAIWithPrompt:(NSString *)prompt
+           enableSearch:(BOOL)enableSearch
+             completion:(void (^)(NSString *output, NSError *error))completion {
     NSString *supportPath = [self supportDirectoryPath];
     NSString *uuid = NSUUID.UUID.UUIDString;
     NSString *outputPath = [supportPath stringByAppendingPathComponent:
@@ -1883,25 +1888,37 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     NSFileHandle *logHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
     NSPipe *inputPipe = [NSPipe pipe];
-    NSString *searchFlag = enableSearch ? @"--search " : @"";
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *model = [defaults stringForKey:@"TBCodexModel"];
-    NSString *modelFlag = model.length > 0
-        ? [NSString stringWithFormat:@"-m %@ ", [self shellQuotedString:model]]
-        : @"";
-    NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
-    NSString *effortFlag = effort.length > 0
-        ? [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ", [self shellQuotedString:effort]]
-        : @"";
+    NSString *engine = [defaults stringForKey:@"TBAIEngine"] ?: @"codex";
+    NSString *pathSetup =
+        @"for d in \"$HOME\"/.nvm/versions/node/*/bin /opt/homebrew/bin /usr/local/bin; do "
+         "[ -d \"$d\" ] && PATH=\"$d:$PATH\"; done; export PATH; ";
 
-    NSString *command = [NSString stringWithFormat:
-                         @"for d in \"$HOME\"/.nvm/versions/node/*/bin /opt/homebrew/bin /usr/local/bin; do "
-                          "[ -d \"$d\" ] && PATH=\"$d:$PATH\"; done; export PATH; "
-                          "codex %@exec %@%@--skip-git-repo-check --sandbox read-only "
-                          "--ephemeral --color never --output-last-message %@ -",
-                         searchFlag, modelFlag, effortFlag,
-                         [self shellQuotedString:outputPath]];
+    NSString *command;
+    if ([engine isEqualToString:@"claude"]) {
+        NSString *model = [defaults stringForKey:@"TBClaudeModel"];
+        NSString *modelFlag = model.length > 0
+            ? [NSString stringWithFormat:@"--model %@ ", [self shellQuotedString:model]]
+            : @"";
+        // Claude prints the answer to stdout (captured in the log), so no
+        // --output-last-message file; the prompt is piped in on stdin.
+        command = [pathSetup stringByAppendingFormat:@"claude -p %@--output-format text", modelFlag];
+    } else {
+        NSString *searchFlag = enableSearch ? @"--search " : @"";
+        NSString *model = [defaults stringForKey:@"TBCodexModel"];
+        NSString *modelFlag = model.length > 0
+            ? [NSString stringWithFormat:@"-m %@ ", [self shellQuotedString:model]]
+            : @"";
+        NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
+        NSString *effortFlag = effort.length > 0
+            ? [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ", [self shellQuotedString:effort]]
+            : @"";
+        command = [pathSetup stringByAppendingFormat:
+                   @"codex %@exec %@%@--skip-git-repo-check --sandbox read-only "
+                    "--ephemeral --color never --output-last-message %@ -",
+                   searchFlag, modelFlag, effortFlag, [self shellQuotedString:outputPath]];
+    }
 
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = [NSURL fileURLWithPath:@"/bin/zsh"];

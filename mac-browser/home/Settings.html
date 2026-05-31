@@ -31,20 +31,21 @@
     <section class="card">
       <div class="card-row">
         <div class="card-text">
-          <h2>AI engine (Codex)</h2>
-          <p>Choose the Codex model and how hard it thinks. Higher effort is more
-            thorough but slower; lower effort is faster.</p>
+          <h2>AI engine</h2>
+          <p>Choose which CLI powers Ask, Edit, and AI search — Codex or Claude —
+            its model, and (for Codex) how hard it thinks.</p>
         </div>
         <div class="controls">
-          <label>Model
-            <select id="codex-model">
-              <option value="">Default</option>
-              <option value="gpt-5-codex">gpt-5-codex</option>
-              <option value="gpt-5">gpt-5</option>
-              <option value="gpt-5-mini">gpt-5-mini</option>
+          <label>Engine
+            <select id="ai-engine">
+              <option value="codex">Codex</option>
+              <option value="claude">Claude</option>
             </select>
           </label>
-          <label>Speed
+          <label>Model
+            <select id="ai-model"></select>
+          </label>
+          <label id="speed-field">Speed
             <select id="codex-speed">
               <option value="minimal">Fastest</option>
               <option value="low">Fast</option>
