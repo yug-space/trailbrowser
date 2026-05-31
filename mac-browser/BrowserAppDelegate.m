@@ -1812,6 +1812,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
          "th{color:#8a8a90;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;font-size:12px}"
          "hr{border:0;border-top:1px solid rgba(255,255,255,0.09);margin:34px 0}"
          "img{max-width:100%%;border-radius:10px}"
+         "svg{display:block;max-width:100%%;height:auto;margin:8px auto 4px}"
          "@media(prefers-reduced-motion:reduce){article{animation:none}}"
          "</style></head><body><div class='wrap'>"
          "<header class='page'><p class='eyebrow'>TrailBrowser AI</p><h1>%@</h1></header>"
@@ -1844,14 +1845,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                          baseURL:nil];
 
     NSString *prompt = [NSString stringWithFormat:
-        @"You are TrailBrowser AI, a research writer. Write a clear, accurate, informative article that answers the user's query.\n"
+        @"You are TrailBrowser AI. Respond to the user's query by returning an HTML body fragment that a styled template will display.\n"
          "Output format — IMPORTANT:\n"
-         "- Return ONLY an HTML body fragment: a sequence of semantic elements such as <p>, <h2>, <h3>, <ul>, <ol>, <table>, <blockquote>, and <a href> for links/sources.\n"
-         "- Do NOT include <!doctype>, <html>, <head>, <body>, <style>, <script>, CSS, inline style attributes, or markdown code fences. The page styling is already provided by a template — output content only.\n"
-         "- Do NOT repeat the query as a top-level <h1>; the template already shows the title. Start directly with a short intro <p>.\n"
-         "Content:\n"
-         "- Open with a 1-2 sentence intro paragraph, then organized sections with <h2> headings, using lists or a <table> where they help, and end with a brief summary.\n"
-         "- Use accurate, concrete, up-to-date information; use live web search when helpful and link sources with <a href>.\n\n"
+         "- Return ONLY an HTML body fragment. No <!doctype>, <html>, <head>, <body>, <script>, <img>, external resources, or markdown code fences.\n"
+         "- Do NOT repeat the query as a top-level <h1>; the template already shows the title.\n"
+         "Pick the right mode for the query:\n"
+         "- If it asks to DRAW, illustrate, visualize, render, or show a picture/diagram of something: output a self-contained inline <svg> illustration. Use a viewBox, shapes, paths, <defs> with radialGradient/linearGradient/filter for depth, and presentation attributes (fill, stroke) or inline style attributes for color. Make it detailed and visually convincing. You may add one short <p> caption below. Do NOT write an article in this case.\n"
+         "- Otherwise: write a clear, accurate article — a short intro <p>, then sections with <h2> headings, <ul>/<ol>/<table> where useful, and a brief summary. Use accurate up-to-date facts; use live web search when helpful and link sources with <a href>.\n\n"
          "User query:\n%@\n",
         trimmed];
 
