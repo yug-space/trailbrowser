@@ -963,7 +963,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self updateTabCount];
 
     NSInteger index = (NSInteger)self.tabs.count - 1;
-    if (select) [self selectTabAtIndex:index];
+    if (select) {
+        [self selectTabAtIndex:index];
+    } else if (configuration == nil) {
+        [self preloadTab:tab];
+        [self enforceLiveTabBudget];
+    }
 
     return tab;
 }
@@ -1048,6 +1053,27 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 }
 
+- (void)loadContentForTab:(BrowserTab *)tab {
+    WKWebView *webView = tab.webView;
+    if (!webView || webView.URL != nil || tab.urlString.length == 0) return;
+    if ([self isHomeURLString:tab.urlString]) {
+        [self loadNativeHomePageInWebView:webView];
+    } else if ([self isSettingsURLString:tab.urlString]) {
+        [self loadNativeSettingsPageInWebView:webView];
+    } else if ([self isOnboardingURLString:tab.urlString]) {
+        [self loadNativeOnboardingPageInWebView:webView];
+    } else {
+        NSURL *url = [self URLForUserInput:tab.urlString];
+        if (url) [webView loadRequest:[NSURLRequest requestWithURL:url]];
+    }
+}
+
+- (void)preloadTab:(BrowserTab *)tab {
+    if (tab.webView) return;
+    [self ensureWebViewForTab:tab];
+    [self loadContentForTab:tab];
+}
+
 - (void)selectTabAtIndex:(NSInteger)index {
     if (index < 0 || index >= (NSInteger)self.tabs.count) return;
     if (index == self.activeTabIndex && self.webView == self.tabs[(NSUInteger)index].webView) return;
@@ -1071,18 +1097,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
     [self refreshActiveRowHighlight];
 
-    if (self.webView.URL == nil && tab.urlString.length > 0) {
-        if ([self isHomeURLString:tab.urlString]) {
-            [self loadNativeHomePageInWebView:self.webView];
-        } else if ([self isSettingsURLString:tab.urlString]) {
-            [self loadNativeSettingsPageInWebView:self.webView];
-        } else if ([self isOnboardingURLString:tab.urlString]) {
-            [self loadNativeOnboardingPageInWebView:self.webView];
-        } else {
-            NSURL *url = [self URLForUserInput:tab.urlString];
-            if (url) [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
-        }
-    }
+    [self loadContentForTab:tab];
 
     if (self.webView.URL) {
         [self syncAddressBarWithWebView];
