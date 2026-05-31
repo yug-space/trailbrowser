@@ -15,7 +15,7 @@
 
 @implementation BrowserAppDelegate
 
-static const NSInteger kMaxLiveTabs = 6;
+static const NSInteger kMaxLiveTabs = 24;
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
