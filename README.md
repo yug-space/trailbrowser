@@ -13,28 +13,47 @@ runtime.
 
 The app includes:
 
-- Native desktop window and toolbar
-- Address/search bar
-- Back, forward, reload, home, and stop controls
-- Sidebar tabs with add/close controls
+- A flat, near-black UI with a warm-orange accent and smooth control animations
+- A centered address/search bar with back, forward, reload, and stop controls
+- A native **home page** with a Google ⇄ AI search toggle and quick links
+- A **settings page** (`Cmd+,`) for syncing Chrome cookies and more
+- Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
+  slept), and hover-to-close
 - Low-memory tab sleeping on macOS: inactive sidebar tabs keep URL/title
   metadata and release their WebKit view
-- Loading progress indicator
+- A built-in **page assistant** (Ask / Edit) powered by the `codex` CLI
+- A 2px accent loading bar and a status pill
 - WebKit rendering for modern websites with HTML, CSS, JavaScript, images,
   history, and navigation
-- macOS keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+[`, and `Cmd+]`
+- macOS keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`, `Cmd+B`,
+  `Cmd+,`, `Cmd+[`, and `Cmd+]`
 - Optional, user-initiated **cookie import from Google Chrome** on macOS
 
 ## Files
 
+The macOS app is split into focused source files (see [AGENTS.md](AGENTS.md)
+for the full architecture):
+
 | File | Purpose |
 |------|---------|
-| `mac-browser/Browser.m` | Objective-C AppKit + WebKit browser app |
-| `mac-browser/ChromeCookieImporter.h/.m` | Imports cookies from a local Chrome profile |
+| `mac-browser/main.m` | `NSApplication` entry point |
+| `mac-browser/BrowserAppDelegate.{h,m}` | App controller: window, tabs, navigation, assistant, history, cookies |
+| `mac-browser/BrowserTab.{h,m}` | Tab model (sleeps its `WKWebView` when inactive) |
+| `mac-browser/BrowserTabViews.{h,m}` | Sidebar tab row + cell views |
+| `mac-browser/TBControls.{h,m}` | Themed controls (flat buttons, pill button, progress bar, field) |
+| `mac-browser/TBTheme.{h,m}` | Color palette + layer animation helper |
+| `mac-browser/ChromeCookieImporter.{h,m}` | Imports cookies from a local Chrome profile |
+| `mac-browser/home/` | Bundled internal pages: `Home.*` and `Settings.*` |
 | `mac-browser/Info.plist` | macOS app bundle metadata |
 | `linux-browser/trailbrowser.c` | Lightweight C/GTK/WebKitGTK Linux browser app |
 | `mcp-history-server/server.mjs` | Read-only MCP server for TrailBrowser history |
 | `Makefile` | Builds the native app for macOS or Linux |
+
+## Documentation
+
+- [AGENTS.md](AGENTS.md) — architecture, file map, conventions, and gotchas
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, style, and test changes
+- [LICENSE](LICENSE) — MIT
 
 ## Build
 
@@ -173,16 +192,18 @@ On macOS, `main()` starts an `NSApplication` and installs `BrowserAppDelegate` a
 delegate.
 
 When macOS finishes launching the app, `applicationDidFinishLaunching:` runs.
-That method creates the menu, builds the browser window, and loads
-`https://www.google.com`.
+That method creates the menu, builds the browser window, and opens the native
+home page (`trailbrowser://home`).
 
-The UI is native AppKit:
+The UI is native AppKit, themed near-black with a warm-orange accent
+(`TBTheme`):
 
-- `NSWindow` is the main app window.
-- `NSVisualEffectView` creates the macOS toolbar surface.
-- `NSButton` creates the navigation buttons.
-- `NSSearchField` is the address/search bar.
-- `NSProgressIndicator` shows page load progress.
+- `NSWindow` is the main app window; the toolbar and sidebar are flat
+  layer-backed `NSView`s.
+- `TBFlatButton` / `TBPillButton` are the navigation and action buttons.
+- A `TBFieldContainer` wraps the address `NSTextField` as a focusable pill.
+- `TBProgressBar` shows page load progress as a 2px accent line.
+- `NSTableView` with `BrowserTabViews` renders the sidebar tab list.
 
 The web page itself is rendered by WebKit:
 
