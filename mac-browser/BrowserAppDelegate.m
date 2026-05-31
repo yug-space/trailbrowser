@@ -88,6 +88,20 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self addMenuItem:@"Forward" action:@selector(goForward:) key:@"]" menu:navMenu];
     [navMenuItem setSubmenu:navMenu];
 
+    // Standard Edit menu so Cmd+C/V/X/A and Undo route to the address field and
+    // web content via the responder chain (these items target the first responder).
+    NSMenuItem *editMenuItem = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
+    [mainMenu addItem:editMenuItem];
+    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+    [self addEditItem:@"Undo" action:@selector(undo:) key:@"z" shift:NO menu:editMenu];
+    [self addEditItem:@"Redo" action:@selector(redo:) key:@"z" shift:YES menu:editMenu];
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    [self addEditItem:@"Cut" action:@selector(cut:) key:@"x" shift:NO menu:editMenu];
+    [self addEditItem:@"Copy" action:@selector(copy:) key:@"c" shift:NO menu:editMenu];
+    [self addEditItem:@"Paste" action:@selector(paste:) key:@"v" shift:NO menu:editMenu];
+    [self addEditItem:@"Select All" action:@selector(selectAll:) key:@"a" shift:NO menu:editMenu];
+    [editMenuItem setSubmenu:editMenu];
+
     [NSApp setMainMenu:mainMenu];
 }
 
@@ -95,6 +109,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:key];
     item.target = self;
     item.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+    [menu addItem:item];
+}
+
+- (void)addEditItem:(NSString *)title action:(SEL)action key:(NSString *)key shift:(BOOL)shift menu:(NSMenu *)menu {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:key];
+    item.keyEquivalentModifierMask = shift
+        ? (NSEventModifierFlagCommand | NSEventModifierFlagShift)
+        : NSEventModifierFlagCommand;
     [menu addItem:item];
 }
 
@@ -159,6 +181,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                              fallback:@"R"
                                               tooltip:@"Reload"
                                                action:@selector(reloadPage:)];
+    self.plusButton = [self toolbarButtonWithSymbol:@"plus"
+                                             fallback:@"+"
+                                              tooltip:@"New Tab"
+                                               action:@selector(newTab:)];
+
+    NSView *navDivider = [self hairlineView];
+    [toolbar addSubview:navDivider];
 
     self.addressContainer = [[TBFieldContainer alloc] initWithFrame:NSZeroRect];
     self.addressContainer.translatesAutoresizingMaskIntoConstraints = NO;
@@ -324,7 +353,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self.sidebar addSubview:settingsRow];
 
     for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton,
-                           self.addressContainer, self.reloadButton, self.statusDot,
+                           self.addressContainer, self.reloadButton, self.statusDot, self.plusButton,
                            self.askButton, self.settingsButton, self.progressBar ]) {
         [toolbar addSubview:view];
     }
@@ -333,14 +362,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     NSLayoutConstraint *addressCenter = [self.addressContainer.centerXAnchor constraintEqualToAnchor:toolbar.centerXAnchor];
     addressCenter.priority = NSLayoutPriorityDefaultHigh - 1;
-    NSLayoutConstraint *addressWidth = [self.addressContainer.widthAnchor constraintEqualToConstant:440.0];
+    NSLayoutConstraint *addressWidth = [self.addressContainer.widthAnchor constraintEqualToConstant:620.0];
     addressWidth.priority = NSLayoutPriorityDefaultHigh;
 
     [NSLayoutConstraint activateConstraints:@[
         [toolbar.topAnchor constraintEqualToAnchor:root.topAnchor],
         [toolbar.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
         [toolbar.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
-        [toolbar.heightAnchor constraintEqualToConstant:54.0],
+        [toolbar.heightAnchor constraintEqualToConstant:46.0],
 
         [toolbarHairline.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor],
         [toolbarHairline.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor],
@@ -350,9 +379,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.sidebarToggleButton.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor constant:88.0],
         [self.sidebarToggleButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
-        [self.backButton.leadingAnchor constraintEqualToAnchor:self.sidebarToggleButton.trailingAnchor constant:10.0],
+        [self.backButton.leadingAnchor constraintEqualToAnchor:self.sidebarToggleButton.trailingAnchor constant:8.0],
         [self.backButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-        [self.forwardButton.leadingAnchor constraintEqualToAnchor:self.backButton.trailingAnchor constant:6.0],
+
+        [navDivider.leadingAnchor constraintEqualToAnchor:self.backButton.trailingAnchor constant:5.0],
+        [navDivider.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        [navDivider.widthAnchor constraintEqualToConstant:1.0],
+        [navDivider.heightAnchor constraintEqualToConstant:14.0],
+
+        [self.forwardButton.leadingAnchor constraintEqualToAnchor:navDivider.trailingAnchor constant:5.0],
         [self.forwardButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
         addressCenter,
@@ -360,7 +395,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.addressContainer.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.forwardButton.trailingAnchor constant:16.0],
         [self.addressContainer.trailingAnchor constraintLessThanOrEqualToAnchor:self.reloadButton.leadingAnchor constant:-16.0],
         [self.addressContainer.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-        [self.addressContainer.heightAnchor constraintEqualToConstant:34.0],
+        [self.addressContainer.heightAnchor constraintEqualToConstant:32.0],
 
         [addressIcon.leadingAnchor constraintEqualToAnchor:self.addressContainer.leadingAnchor constant:12.0],
         [addressIcon.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
@@ -374,17 +409,20 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.settingsButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-14.0],
         [self.settingsButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
-        [self.askButton.trailingAnchor constraintEqualToAnchor:self.settingsButton.leadingAnchor constant:-10.0],
+        [self.askButton.trailingAnchor constraintEqualToAnchor:self.settingsButton.leadingAnchor constant:-8.0],
         [self.askButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
         [self.askButton.widthAnchor constraintEqualToConstant:56.0],
         [self.askButton.heightAnchor constraintEqualToConstant:30.0],
 
-        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-12.0],
+        [self.plusButton.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-6.0],
+        [self.plusButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+
+        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.plusButton.leadingAnchor constant:-10.0],
         [self.statusDot.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
         [self.statusDot.widthAnchor constraintEqualToConstant:6.0],
         [self.statusDot.heightAnchor constraintEqualToConstant:6.0],
 
-        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.statusDot.leadingAnchor constant:-12.0],
+        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.statusDot.leadingAnchor constant:-10.0],
         [self.reloadButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
         [self.progressBar.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor],
@@ -1092,37 +1130,33 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
            [trimmed isEqualToString:@"trailbrowser://welcome/"];
 }
 
+- (NSString *)resourceStringNamed:(NSString *)name extension:(NSString *)extension {
+    NSURL *url = [[NSBundle mainBundle] URLForResource:name withExtension:extension subdirectory:@"home"];
+    return url ? [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil] : nil;
+}
+
+// Inline the page's CSS and JS so internal pages render correctly regardless of
+// the base URL, and so we can use a trailbrowser:// base (keeping the address
+// bar clean instead of exposing the bundle's file path).
 - (NSString *)nativeResourceHTMLNamed:(NSString *)name {
-    NSURL *url = [[NSBundle mainBundle] URLForResource:name withExtension:@"html" subdirectory:@"home"];
-    NSError *error = nil;
-    NSString *html = url ? [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:&error] : nil;
-    if (html.length > 0) return html;
+    NSString *html = [self resourceStringNamed:name extension:@"html"];
+    if (html.length == 0) {
+        return @"<!doctype html><title>TrailBrowser</title><body style='background:#0a0a0b'></body>";
+    }
 
-    NSLog(@"Could not load %@ resource: %@", name, error.localizedDescription);
-    return @"<!doctype html><title>TrailBrowser</title><body><h1>TrailBrowser</h1></body>";
-}
-
-- (NSURL *)nativeResourceBaseURL {
-    NSURL *url = [[NSBundle mainBundle] URLForResource:@"Home" withExtension:@"html" subdirectory:@"home"];
-    return url.URLByDeletingLastPathComponent ?: [NSURL URLWithString:[self homeURLString]];
-}
-
-- (BOOL)isNativeFileURLNamed:(NSString *)fileName url:(NSURL *)url {
-    return url.isFileURL &&
-           [url.lastPathComponent isEqualToString:fileName] &&
-           [url.path containsString:@"/Resources/home/"];
-}
-
-- (BOOL)isNativeHomeFileURL:(NSURL *)url {
-    return [self isNativeFileURLNamed:@"Home.html" url:url];
-}
-
-- (BOOL)isNativeSettingsFileURL:(NSURL *)url {
-    return [self isNativeFileURLNamed:@"Settings.html" url:url];
-}
-
-- (BOOL)isNativeOnboardingFileURL:(NSURL *)url {
-    return [self isNativeFileURLNamed:@"Onboarding.html" url:url];
+    NSString *css = [self resourceStringNamed:name extension:@"css"];
+    if (css.length > 0) {
+        NSString *link = [NSString stringWithFormat:@"<link rel=\"stylesheet\" href=\"%@.css\">", name];
+        html = [html stringByReplacingOccurrencesOfString:link
+                                               withString:[NSString stringWithFormat:@"<style>\n%@\n</style>", css]];
+    }
+    NSString *js = [self resourceStringNamed:name extension:@"js"];
+    if (js.length > 0) {
+        NSString *tag = [NSString stringWithFormat:@"<script src=\"%@.js\"></script>", name];
+        html = [html stringByReplacingOccurrencesOfString:tag
+                                               withString:[NSString stringWithFormat:@"<script>\n%@\n</script>", js]];
+    }
+    return html;
 }
 
 - (NSString *)queryValueNamed:(NSString *)name inURL:(NSURL *)url {
@@ -1145,7 +1179,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     if ([host isEqualToString:@"deep-search"]) {
         NSString *query = [self queryValueNamed:@"q" inURL:url];
-        if (query.length > 0) [self runDeepSearchForQuery:query];
+        if (query.length > 0) [self runWebpageSearchForQuery:query];
         return YES;
     }
 
@@ -1186,9 +1220,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self reloadSidebarRowForTab:tab];
     }
     self.addressField.stringValue = [self homeURLString];
+    self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
     [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Home"]
-                    baseURL:[self nativeResourceBaseURL]];
+                    baseURL:[NSURL URLWithString:[self homeURLString]]];
 }
 
 - (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
@@ -1200,9 +1235,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self reloadSidebarRowForTab:tab];
     }
     self.addressField.stringValue = [self settingsURLString];
+    self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
     [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Settings"]
-                    baseURL:[self nativeResourceBaseURL]];
+                    baseURL:[NSURL URLWithString:[self settingsURLString]]];
 }
 
 - (void)loadNativeOnboardingPageInWebView:(WKWebView *)webView {
@@ -1214,9 +1250,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self reloadSidebarRowForTab:tab];
     }
     self.addressField.stringValue = [self onboardingURLString];
+    self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
     [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Onboarding"]
-                    baseURL:[self nativeResourceBaseURL]];
+                    baseURL:[NSURL URLWithString:[self onboardingURLString]]];
 }
 
 - (void)openSettings:(id)sender {
@@ -1569,35 +1606,116 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantResultTextView.string = message ?: @"";
 }
 
-- (void)runDeepSearchForQuery:(NSString *)query {
+- (NSString *)htmlEscaped:(NSString *)text {
+    NSString *value = text ?: @"";
+    value = [value stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
+    value = [value stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
+    value = [value stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+    return value;
+}
+
+- (NSString *)statusPageHTMLForQuery:(NSString *)query
+                              title:(NSString *)heading
+                               note:(NSString *)note
+                            spinning:(BOOL)spinning {
+    NSString *q = [self htmlEscaped:query];
+    NSString *spinner = spinning
+        ? @"<div class='spin'></div>"
+        : @"<div class='dot'></div>";
+    return [NSString stringWithFormat:
+        @"<!doctype html><html><head><meta charset='utf-8'><style>"
+         "html,body{height:100%%;margin:0}"
+         "body{display:grid;place-items:center;background:#0a0a0b;color:#f3f3f4;"
+         "font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',sans-serif}"
+         ".box{text-align:center;max-width:520px;padding:0 24px}"
+         ".spin{width:34px;height:34px;margin:0 auto 22px;border-radius:50%%;"
+         "border:3px solid rgba(255,255,255,0.12);border-top-color:#f76b1c;animation:s 0.8s linear infinite}"
+         ".dot{width:14px;height:14px;margin:0 auto 22px;border-radius:50%%;background:#ff4d4d}"
+         "@keyframes s{to{transform:rotate(360deg)}}"
+         "h1{font-size:20px;font-weight:600;margin:0 0 8px}"
+         "p{color:#8a8a90;font-size:14px;line-height:1.5;margin:0}"
+         ".q{color:#f76b1c}"
+         "</style></head><body><div class='box'>%@"
+         "<h1>%@</h1><p class='q'>%@</p><p>%@</p></div></body></html>",
+        spinner, [self htmlEscaped:heading], q, [self htmlEscaped:note]];
+}
+
+- (NSString *)htmlFromCodexOutput:(NSString *)output {
+    NSString *trimmed = [output stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSRegularExpression *regex =
+        [NSRegularExpression regularExpressionWithPattern:@"```(?:html)?\\s*(.*?)```"
+                                                  options:NSRegularExpressionCaseInsensitive | NSRegularExpressionDotMatchesLineSeparators
+                                                    error:nil];
+    NSTextCheckingResult *match = [regex firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+    if (match && match.numberOfRanges > 1) {
+        trimmed = [[trimmed substringWithRange:[match rangeAtIndex:1]]
+                   stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    }
+
+    NSString *lower = trimmed.lowercaseString;
+    if ([lower hasPrefix:@"<!doctype"] || [lower hasPrefix:@"<html"] || [lower hasPrefix:@"<"]) {
+        return trimmed;
+    }
+    return [NSString stringWithFormat:
+        @"<!doctype html><html><head><meta charset='utf-8'><style>"
+         "body{background:#0a0a0b;color:#f3f3f4;font-family:-apple-system,sans-serif;"
+         "max-width:720px;margin:0 auto;padding:48px 24px;line-height:1.6}</style></head>"
+         "<body><pre style='white-space:pre-wrap'>%@</pre></body></html>",
+        [self htmlEscaped:trimmed]];
+}
+
+- (void)runWebpageSearchForQuery:(NSString *)query {
     NSString *trimmed = [query stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (trimmed.length == 0) {
         NSBeep();
         return;
     }
+    if (!self.webView) {
+        [self newTabWithURLString:[self homeURLString] select:YES];
+    }
 
-    self.assistantModeControl.selectedSegment = 0;
-    [self assistantModeChanged:nil];
-    self.assistantPromptField.stringValue = @"";
-    [self setAssistantWorking:YES];
-    [self showAssistantMessage:[NSString stringWithFormat:@"Deep Search is researching: %@", trimmed]];
+    BrowserTab *tab = [self activeTab];
+    if (tab) {
+        tab.title = trimmed;
+        tab.favicon = nil;
+        [self reloadSidebarRowForTab:tab];
+    }
+    self.addressField.stringValue = trimmed;
+    [self setStatusText:@"Loading"];
+    [self.webView loadHTMLString:[self statusPageHTMLForQuery:trimmed
+                                                        title:@"Generating a page for"
+                                                         note:@"TrailBrowser AI is building a page with Codex…"
+                                                     spinning:YES]
+                         baseURL:nil];
 
     NSString *prompt = [NSString stringWithFormat:
-                        @"You are TrailBrowser Deep Search.\n"
-                         "Use live web search when helpful. Produce a detailed, high-signal answer.\n"
-                         "Include concrete findings, dates when relevant, tradeoffs, and source links when available.\n"
-                         "If the query asks for a comparison or recommendation, give a clear conclusion and rationale.\n\n"
-                         "Deep Search query:\n%@\n",
-                        trimmed];
+        @"You are TrailBrowser AI. Build a single, complete, self-contained HTML5 web page that answers and explores the user's query.\n"
+         "Rules:\n"
+         "- Output ONLY raw HTML: one full <!doctype html> document. No markdown, no code fences, no commentary before or after.\n"
+         "- Inline all CSS in a <style> tag. Do not reference any external stylesheet, script, font, or image, and do not make network requests.\n"
+         "- Use a clean modern dark theme: background #0a0a0b, text #f3f3f4, muted #8a8a90, a warm orange accent #f76b1c, system-ui font, generous spacing, max readable content width.\n"
+         "- Structure it like a real informative web page: a clear header/title, well-organized sections with headings, lists or tables where useful, and a short summary. Use accurate, concrete information; use live web search when helpful.\n"
+         "- Keep it safe and self-contained: no forms posting anywhere, no tracking.\n\n"
+         "User query:\n%@\n",
+        trimmed];
 
     [self runCodexWithPrompt:prompt enableSearch:YES completion:^(NSString *output, NSError *error) {
-        [self setAssistantWorking:NO];
         if (error) {
-            [self showAssistantMessage:error.localizedDescription];
+            [self setStatusText:error.localizedDescription ?: @"Failed"];
+            [self.webView loadHTMLString:[self statusPageHTMLForQuery:trimmed
+                                                                title:@"Could not generate a page"
+                                                                 note:error.localizedDescription ?: @"Codex is unavailable. Is the codex CLI installed and on PATH?"
+                                                             spinning:NO]
+                                 baseURL:nil];
             return;
         }
-        [self showAssistantMessage:[output stringByTrimmingCharactersInSet:
-                                    NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+        [self setStatusText:@"Ready"];
+        [self.webView loadHTMLString:[self htmlFromCodexOutput:output] baseURL:nil];
+        BrowserTab *active = [self activeTab];
+        if (active) {
+            active.title = trimmed;
+            [self reloadSidebarRowForTab:active];
+        }
     }];
 }
 
@@ -2199,23 +2317,20 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     BrowserTab *tab = [self tabForWebView:webView];
     if (!tab) return;
 
-    if ([self isHomeURLString:tab.urlString] || [self isNativeHomeFileURL:webView.URL]) {
+    if ([self isHomeURLString:tab.urlString]) {
         tab.title = @"TrailBrowser Home";
-        tab.urlString = [self homeURLString];
         [self reloadSidebarRowForTab:tab];
         return;
     }
 
-    if ([self isSettingsURLString:tab.urlString] || [self isNativeSettingsFileURL:webView.URL]) {
+    if ([self isSettingsURLString:tab.urlString]) {
         tab.title = @"Settings";
-        tab.urlString = [self settingsURLString];
         [self reloadSidebarRowForTab:tab];
         return;
     }
 
-    if ([self isOnboardingURLString:tab.urlString] || [self isNativeOnboardingFileURL:webView.URL]) {
+    if ([self isOnboardingURLString:tab.urlString]) {
         tab.title = @"Welcome";
-        tab.urlString = [self onboardingURLString];
         [self reloadSidebarRowForTab:tab];
         return;
     }
@@ -2462,10 +2577,26 @@ decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
 decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     (void)webView;
     NSURL *url = navigationAction.request.URL;
-    if (url && [self handleInternalURL:url]) {
-        decisionHandler(WKNavigationActionPolicyCancel);
-        return;
+
+    if ([url.scheme.lowercaseString isEqualToString:@"trailbrowser"]) {
+        NSString *host = url.host.lowercaseString ?: @"";
+        BOOL pageHost = host.length == 0 ||
+                        [host isEqualToString:@"home"] ||
+                        [host isEqualToString:@"settings"] ||
+                        [host isEqualToString:@"welcome"];
+        // Our own loadHTMLString render of an internal page uses a trailbrowser://
+        // base URL — allow it through instead of re-handling it (which would loop).
+        if (pageHost && self.renderingInternalPage) {
+            self.renderingInternalPage = NO;
+            decisionHandler(WKNavigationActionPolicyAllow);
+            return;
+        }
+        if ([self handleInternalURL:url]) {
+            decisionHandler(WKNavigationActionPolicyCancel);
+            return;
+        }
     }
+
     decisionHandler(WKNavigationActionPolicyAllow);
 }
 

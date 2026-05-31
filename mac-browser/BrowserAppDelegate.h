@@ -22,6 +22,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSButton *forwardButton;
 @property (nonatomic, strong) NSButton *sidebarToggleButton;
 @property (nonatomic, strong) NSButton *reloadButton;
+@property (nonatomic, strong) NSButton *plusButton;
 @property (nonatomic, strong) NSButton *addTabButton;
 @property (nonatomic, strong) NSButton *closeTabButton;
 @property (nonatomic, strong) TBPillButton *askButton;
@@ -40,6 +41,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSLayoutConstraint *sidebarWidthConstraint;
 @property (nonatomic, copy) NSString *lastRecordedURL;
 @property (nonatomic, assign) NSInteger activeTabIndex;
+@property (nonatomic, assign) BOOL renderingInternalPage;
 @property (nonatomic, assign) BOOL userEditingAddress;
 @property (nonatomic, assign) BOOL sidebarVisible;
 @end
