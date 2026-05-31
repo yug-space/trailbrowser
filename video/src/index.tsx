@@ -4,7 +4,7 @@
 //   npm run dev      (preview in Remotion Studio)
 //   npx remotion render TrailBrowserExplainer out/trailbrowser.mp4
 //
-// 1920x1080 · 30fps · ~11s, fast-cut. Theme mirrors TrailBrowser's TBTheme (#f76b1c).
+// 1920x1080 · 30fps · ~13s, fast-cut. Theme mirrors TrailBrowser's TBTheme (#f76b1c).
 
 import React from "react";
 import {
@@ -52,12 +52,13 @@ const palette = {
 const FPS = 30;
 const D_INTRO = 66;
 const D_MEMORY = 78;
-const D_AI = 96;
+const D_AI = 84;
+const D_LOCAL = 84;
 const D_MCP = 84;
 const D_OUTRO = 60;
 const T = 12; // transition overlap
 const TOTAL_DURATION =
-  D_INTRO + D_MEMORY + D_AI + D_MCP + D_OUTRO - 4 * T;
+  D_INTRO + D_MEMORY + D_AI + D_LOCAL + D_MCP + D_OUTRO - 5 * T;
 
 /* ── spring configs ─────────────────────────────────────────────────────── */
 const SNAP = { damping: 14, mass: 0.6, stiffness: 130 } as const;
@@ -327,21 +328,6 @@ const SkeletonLine: React.FC<{ i: number }> = ({ i }) => {
   return <div style={{ height: 14, background: palette.textFaint, borderRadius: 6, margin: "10px 0", width: `${(90 - i * 6) * s}%`, opacity: 0.4 }} />;
 };
 
-const EngineChip: React.FC<{ name: string; cmd: string; tag: string; delay: number }> = ({ name, cmd, tag, delay }) => {
-  const frame = useCurrentFrame();
-  const glow = 6 + pulse(frame, 9) * 10;
-  return (
-    <Pop delay={delay} from={0.85}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, background: palette.surfaceHi, border: `1px solid ${palette.border}`, borderRadius: 12, padding: "11px 16px", boxShadow: `0 0 ${glow}px rgba(247,107,28,0.18)` }}>
-        <span style={{ color: palette.accent, fontFamily: monoFont, fontSize: 16 }}>$</span>
-        <span style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 20, color: palette.text }}>{name}</span>
-        <span style={{ fontFamily: monoFont, fontSize: 15, color: palette.textFaint }}>{cmd}</span>
-        <span style={{ fontFamily: monoFont, fontSize: 12, color: palette.accent, background: palette.accentSoft, border: `1px solid ${palette.accent}`, borderRadius: 6, padding: "2px 8px" }}>{tag}</span>
-      </div>
-    </Pop>
-  );
-};
-
 const AIScene: React.FC = () => {
   const frame = useCurrentFrame();
   const q = "Summarize this page in one line.";
@@ -353,7 +339,7 @@ const AIScene: React.FC = () => {
       <Backdrop glowX={70} />
       <SceneHeading eyebrow="AI, in the page" title={<>Ask. Edit. <span style={{ color: palette.accent }}>Search.</span></>} />
       <Pop delay={4} from={0.9} style={{ alignSelf: "center" }}>
-        <BrowserChrome url="https://news.ycombinator.com" height={400} width={1100}>
+        <BrowserChrome url="https://news.ycombinator.com" height={440} width={1100}>
           <AbsoluteFill style={{ opacity: 0.18, padding: 40 }}>
             {Array.from({ length: 9 }).map((_, i) => <SkeletonLine key={i} i={i} />)}
           </AbsoluteFill>
@@ -371,20 +357,76 @@ const AIScene: React.FC = () => {
           </div>
         </BrowserChrome>
       </Pop>
-      <div style={{ marginTop: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-        <div style={{ display: "flex", gap: 16 }}>
-          <EngineChip name="Codex" cmd="codex exec --sandbox read-only" tag="default" delay={56} />
-          <EngineChip name="Claude" cmd="claude -p" tag="Claude Code" delay={62} />
+      <Rise delay={56}>
+        <div style={{ marginTop: 28, textAlign: "center", fontFamily: monoFont, fontSize: 20, color: palette.textDim }}>
+          Reads a redacted snapshot of the page — strips form values &amp; secrets first.
         </div>
-        <Rise delay={70}>
-          <div style={{ textAlign: "center", fontFamily: monoFont, fontSize: 19, color: palette.textDim }}>
-            Runs your local codex or claude CLI — on your Mac, read-only, never your secrets.
-          </div>
-        </Rise>
-      </div>
+      </Rise>
     </AbsoluteFill>
   );
 };
+
+/* ── 3b. local AI — bring your own CLI ──────────────────────────────────── */
+const TypedCmd: React.FC<{ text: string; start: number; dur: number }> = ({ text, start, dur }) => {
+  const frame = useCurrentFrame();
+  const n = Math.floor(ci(frame, [start, start + dur], [0, text.length]));
+  const done = n >= text.length;
+  return (
+    <span style={{ fontFamily: monoFont, fontSize: 16, color: palette.text }}>
+      <span style={{ color: palette.accent }}>$ </span>{text.slice(0, n)}
+      <span style={{ opacity: done ? 0 : frame % 20 < 10 ? 1 : 0, color: palette.accent }}>|</span>
+    </span>
+  );
+};
+
+const CLICard: React.FC<{ name: string; cmd: string; cmdStart: number; badges: string[]; models: string; delay: number; primary?: boolean }> = ({ name, cmd, cmdStart, badges, models, delay, primary }) => {
+  const frame = useCurrentFrame();
+  const lift = floaty(frame, 3, 22);
+  const glow = primary ? 20 + pulse(frame, 9) * 18 : 0;
+  return (
+    <Pop delay={delay} from={0.88}>
+      <div style={{ width: 540, background: palette.surface, border: `1px solid ${primary ? palette.accent : palette.border}`, borderRadius: 16, overflow: "hidden", boxShadow: primary ? `0 0 ${glow}px rgba(247,107,28,0.22)` : "0 30px 70px rgba(0,0,0,0.5)", transform: `translateY(${lift}px)` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 18px", borderBottom: `1px solid ${palette.border}` }}>
+          <div style={{ display: "flex", gap: 7 }}>
+            {[palette.red, palette.yellow, palette.trafficGreen].map((c) => (
+              <div key={c} style={{ width: 11, height: 11, borderRadius: "50%", background: c }} />
+            ))}
+          </div>
+          <span style={{ fontFamily: displayFont, fontWeight: 700, fontSize: 19, color: palette.text, marginLeft: 6 }}>{name}</span>
+          <span style={{ fontFamily: monoFont, fontSize: 13, color: palette.textFaint }}>local CLI</span>
+          {primary ? <span style={{ marginLeft: "auto", fontFamily: monoFont, fontSize: 12, color: palette.accent, background: palette.accentSoft, border: `1px solid ${palette.accent}`, borderRadius: 6, padding: "2px 9px" }}>default</span> : null}
+        </div>
+        <div style={{ padding: "16px 18px 18px" }}>
+          <div style={{ minHeight: 24 }}><TypedCmd text={cmd} start={cmdStart} dur={26} /></div>
+          <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+            {badges.map((b) => (
+              <span key={b} style={{ fontFamily: monoFont, fontSize: 12, color: palette.accent, background: palette.accentSoft, border: `1px solid ${palette.accent}`, borderRadius: 6, padding: "3px 9px" }}>{b}</span>
+            ))}
+          </div>
+          <div style={{ marginTop: 14, fontFamily: monoFont, fontSize: 13.5, color: palette.textDim }}>
+            <span style={{ color: palette.textFaint }}>models </span>{models}
+          </div>
+        </div>
+      </div>
+    </Pop>
+  );
+};
+
+const LocalAIScene: React.FC = () => (
+  <AbsoluteFill style={{ padding: 100, justifyContent: "center" }}>
+    <Backdrop glowX={36} glowY={36} />
+    <SceneHeading eyebrow="Bring your own AI" title={<>Runs on your local <span style={{ color: palette.accent }}>Codex / Claude Code.</span></>} />
+    <div style={{ display: "flex", gap: 28, justifyContent: "center", alignSelf: "center" }}>
+      <CLICard name="Codex" cmd="codex exec --sandbox read-only" cmdStart={14} badges={["read-only", "sandboxed", "ephemeral"]} models="gpt-5-codex · gpt-5 · gpt-5-mini" delay={6} primary />
+      <CLICard name="Claude Code" cmd="claude -p --output-format text" cmdStart={28} badges={["on-device", "no cloud relay"]} models="opus · sonnet · haiku" delay={12} />
+    </div>
+    <Rise delay={54}>
+      <div style={{ marginTop: 30, textAlign: "center", fontFamily: monoFont, fontSize: 19, color: palette.textDim }}>
+        Found on your PATH — ~/.nvm · /opt/homebrew/bin · /usr/local/bin. Nothing leaves your Mac.
+      </div>
+    </Rise>
+  </AbsoluteFill>
+);
 
 /* ── 4. memory MCP ──────────────────────────────────────────────────────── */
 const ToolRow: React.FC<{ name: string; desc: string; delay: number; lit: boolean }> = ({ name, desc, delay, lit }) => (
@@ -479,6 +521,8 @@ const TrailBrowserExplainer: React.FC = () => (
       <TransitionSeries.Transition presentation={wipe({ direction: "from-left" })} timing={fastT} />
       <TransitionSeries.Sequence durationInFrames={D_AI}><AIScene /></TransitionSeries.Sequence>
       <TransitionSeries.Transition presentation={slide({ direction: "from-bottom" })} timing={slideT} />
+      <TransitionSeries.Sequence durationInFrames={D_LOCAL}><LocalAIScene /></TransitionSeries.Sequence>
+      <TransitionSeries.Transition presentation={wipe({ direction: "from-right" })} timing={fastT} />
       <TransitionSeries.Sequence durationInFrames={D_MCP}><MCPScene /></TransitionSeries.Sequence>
       <TransitionSeries.Transition presentation={fade()} timing={fastT} />
       <TransitionSeries.Sequence durationInFrames={D_OUTRO}><OutroScene /></TransitionSeries.Sequence>

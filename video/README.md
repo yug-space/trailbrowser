@@ -1,7 +1,7 @@
 # TrailBrowser explainer video
 
 A self-contained [Remotion](https://www.remotion.dev/) explainer for TrailBrowser.
-1920×1080 · 30fps · ~11s, fast-cut with animated slide/wipe/fade transitions.
+1920×1080 · 30fps · ~13s, fast-cut with animated slide/wipe/fade transitions.
 Theme mirrors `TBTheme` (near-black + `#f76b1c`).
 
 ## Setup
@@ -30,10 +30,11 @@ npx remotion render src/index.tsx TrailBrowserExplainer out/trailbrowser.mp4
 1. **Intro** — animated logo lockup: the brand mark's trail draws itself,
    waypoints pop, the summit ignites, then the wordmark + tagline slide in
 2. **Memory** — ~1/10th of Chrome's resident memory (animated bars)
-3. **AI** — Ask / Edit / Search via your local `codex` or `claude` CLI
-   (shown as on-device, read-only engine chips) on a redacted snapshot
-4. **Memory MCP** — read-only history MCP server + its five tools
-5. **Outro** — `make && open TrailBrowser.app`
+3. **AI** — Ask / Edit / Search on the page, from a redacted snapshot
+4. **Local AI** — runs on your local `codex` / `claude` CLI: typed commands,
+   sandbox/on-device badges, model options, and PATH discovery
+5. **Memory MCP** — read-only history MCP server + its five tools
+6. **Outro** — `make && open TrailBrowser.app`
 
 Everything lives in `src/index.tsx`. The official brand SVGs (mark, app-icon
 tile, wordmark lockup) are in `assets/`; the intro/outro re-create the mark as
