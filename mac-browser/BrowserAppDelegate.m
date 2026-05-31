@@ -1297,8 +1297,22 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.stringValue = [self homeURLString];
     self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
-    [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Home"]
-                    baseURL:[NSURL URLWithString:[self homeURLString]]];
+    NSString *html = [[self nativeResourceHTMLNamed:@"Home"]
+                      stringByReplacingOccurrencesOfString:@"</head>"
+                                                withString:[self aiPrefsScript]];
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:[self homeURLString]]];
+}
+
+- (NSString *)aiPrefsScript {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *engine = [defaults stringForKey:@"TBAIEngine"] ?: @"codex";
+    NSString *codexModel = [defaults stringForKey:@"TBCodexModel"] ?: @"";
+    NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
+    NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
+    return [NSString stringWithFormat:
+        @"<script>window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
+         "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";</script></head>",
+        engine, codexModel, claudeModel, effort];
 }
 
 - (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
@@ -1312,17 +1326,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.stringValue = [self settingsURLString];
     [self setStatusText:@"Ready"];
 
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *engine = [defaults stringForKey:@"TBAIEngine"] ?: @"codex";
-    NSString *codexModel = [defaults stringForKey:@"TBCodexModel"] ?: @"";
-    NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
-    NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
-    NSString *prefs = [NSString stringWithFormat:
-        @"<script>window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
-         "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";</script></head>",
-        engine, codexModel, claudeModel, effort];
     NSString *html = [[self nativeResourceHTMLNamed:@"Settings"]
-                      stringByReplacingOccurrencesOfString:@"</head>" withString:prefs];
+                      stringByReplacingOccurrencesOfString:@"</head>" withString:[self aiPrefsScript]];
 
     self.renderingInternalPage = YES;
     [webView loadHTMLString:html baseURL:[NSURL URLWithString:[self settingsURLString]]];

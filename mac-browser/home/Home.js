@@ -69,6 +69,21 @@ document.querySelectorAll("[data-open]").forEach((button) => {
   button.addEventListener("click", () => openInput(button.dataset.open));
 });
 
+function describeAIEngine() {
+  const engine = window.__tbEngine || "codex";
+  if (engine === "claude") {
+    const model = window.__tbClaudeModel || "default";
+    return `AI page · Claude (${model}) — change engine, model & speed in Settings.`;
+  }
+  const model = window.__tbCodexModel || "default";
+  const speeds = { minimal: "Fastest", low: "Fast", medium: "Balanced", high: "Thorough" };
+  const speed = speeds[window.__tbEffort] || "Fast";
+  return `AI page · Codex (${model}) · ${speed} — change engine, model & speed in Settings.`;
+}
+
+const aiButton = segButtons.find((button) => button.dataset.mode === "ai");
+if (aiButton) aiButton.title = describeAIEngine();
+
 autoGrow();
 refreshSubmitState();
 query.focus();
