@@ -311,7 +311,10 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
 + (nullable NSString *)stringFromColumn:(int)column of:(sqlite3_stmt *)stmt {
     const unsigned char *text = sqlite3_column_text(stmt, column);
     if (!text) return nil;
-    return [NSString stringWithUTF8String:(const char *)text];
+    int length = sqlite3_column_bytes(stmt, column);
+    NSData *data = [NSData dataWithBytes:text length:(NSUInteger)length];
+    NSString *value = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    return value ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
 }
 
 #pragma mark - Cookie construction

@@ -70,6 +70,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)dealloc {
+    if (_memoryPressureSource) dispatch_source_cancel(_memoryPressureSource);
     for (BrowserTab *tab in self.tabs) {
         [self removeObserversFromWebView:tab.webView];
         [tab.webView stopLoading];
@@ -1829,6 +1830,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (!self.webView) {
         [self newTabWithURLString:[self homeURLString] select:YES];
     }
+    if (!self.webView) {
+        NSBeep();
+        return;
+    }
 
     BrowserTab *tab = [self activeTab];
     if (tab) {
@@ -2496,7 +2501,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)closeTabFromButton:(id)sender {
-    NSInteger row = [sender tag];
+    NSInteger row = [self.tabTable rowForView:sender];
+    if (row == -1) row = [sender tag];
+    if (row < 0 || row >= (NSInteger)self.tabs.count) return;
     [self closeTabAtIndex:row];
 }
 
@@ -2612,7 +2619,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)performCookieImportForProfile:(ChromeProfile *)profile {
     [self setStatusText:@"Importing cookies…"];
 
-    WKHTTPCookieStore *store = self.webView.configuration.websiteDataStore.httpCookieStore;
+    WKHTTPCookieStore *store = [WKWebsiteDataStore defaultDataStore].httpCookieStore;
     [ChromeCookieImporter importProfileDirectory:profile.directory
                                  intoCookieStore:store
                                       completion:^(ChromeCookieImportResult *result, NSError *error) {
