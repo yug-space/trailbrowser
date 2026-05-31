@@ -458,11 +458,51 @@ static GtkWidget *icon_button(const gchar *icon_name, const gchar *fallback, con
     if (!button) button = gtk_button_new_with_label(fallback);
     gtk_widget_set_tooltip_text(button, tooltip);
     gtk_widget_set_size_request(button, 36, 32);
+    gtk_style_context_add_class(gtk_widget_get_style_context(button), "tb-flat");
     return button;
+}
+
+// Near-black + warm-orange theme matching the macOS build, applied as a CSS
+// provider over the default screen so it themes every native GTK control.
+static void apply_theme(void) {
+    GtkSettings *settings = gtk_settings_get_default();
+    if (settings) {
+        g_object_set(settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
+    }
+
+    static const gchar *css =
+        "window { background-color: #0a0a0b; color: #f3f3f4; }\n"
+        ".tb-toolbar { background-color: #111113; border-bottom: 1px solid rgba(255,255,255,0.08); }\n"
+        "entry.tb-address {\n"
+        "  background: #1b1b1f; color: #f3f3f4;\n"
+        "  border-radius: 9px; border: 1px solid rgba(255,255,255,0.08);\n"
+        "  padding: 4px 12px; caret-color: #f76b1c; min-height: 26px;\n"
+        "}\n"
+        "entry.tb-address:focus { border-color: #f76b1c; }\n"
+        "entry.tb-address selection { background: rgba(247,107,28,0.35); }\n"
+        "button.tb-flat {\n"
+        "  background: transparent; color: #8a8a90;\n"
+        "  border: none; box-shadow: none; border-radius: 7px;\n"
+        "}\n"
+        "button.tb-flat:hover { background: rgba(255,255,255,0.08); color: #f3f3f4; }\n"
+        "button.tb-flat:active { background: rgba(255,255,255,0.16); }\n"
+        "label.tb-status { color: #8a8a90; }\n"
+        "progressbar.tb-progress trough { background: transparent; border: none; min-height: 2px; }\n"
+        "progressbar.tb-progress progress { background: #f76b1c; border: none; min-height: 2px; }\n";
+
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider, css, -1, NULL);
+    gtk_style_context_add_provider_for_screen(
+        gdk_screen_get_default(),
+        GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
 }
 
 static void activate(GtkApplication *application, gpointer user_data) {
     (void)user_data;
+
+    apply_theme();
 
     Browser *browser = g_new0(Browser, 1);
     browser->application = application;
@@ -475,6 +515,7 @@ static void activate(GtkApplication *application, gpointer user_data) {
     gtk_container_add(GTK_CONTAINER(browser->window), root);
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_style_context_add_class(gtk_widget_get_style_context(toolbar), "tb-toolbar");
     gtk_widget_set_margin_start(toolbar, 8);
     gtk_widget_set_margin_end(toolbar, 8);
     gtk_widget_set_margin_top(toolbar, 8);
@@ -491,6 +532,9 @@ static void activate(GtkApplication *application, gpointer user_data) {
     browser->web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
 
     gtk_entry_set_placeholder_text(GTK_ENTRY(browser->address), "Search or enter website name");
+    gtk_style_context_add_class(gtk_widget_get_style_context(browser->address), "tb-address");
+    gtk_style_context_add_class(gtk_widget_get_style_context(browser->status), "tb-status");
+    gtk_style_context_add_class(gtk_widget_get_style_context(browser->progress), "tb-progress");
     gtk_box_pack_start(GTK_BOX(toolbar), browser->back_button, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), browser->forward_button, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), browser->reload_button, FALSE, FALSE, 0);
