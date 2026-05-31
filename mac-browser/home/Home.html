@@ -3,32 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TrailBrowser Home</title>
+  <title>TrailBrowser</title>
   <link rel="stylesheet" href="Home.css">
 </head>
 <body>
-  <main class="home-shell">
-    <section class="brand">
-      <div class="brand-orb" aria-hidden="true"></div>
-      <div>
-        <h1>TrailBrowser</h1>
-        <p>Open a site, search Google, or run native Codex Deep Search.</p>
+  <main class="home">
+    <h1 class="wordmark">TrailBrowser</h1>
+
+    <form class="search-card" id="search-form" autocomplete="off">
+      <textarea id="query" rows="1" autofocus spellcheck="false"
+                placeholder="Search the web, paste a URL, or ask anything…"></textarea>
+
+      <div class="toolbar">
+        <span class="spacer"></span>
+
+        <div class="seg" id="mode" role="tablist" aria-label="Search mode">
+          <button type="button" class="seg-btn is-active" data-mode="google" role="tab">Google</button>
+          <button type="button" class="seg-btn" data-mode="ai" role="tab">AI</button>
+        </div>
+
+        <button type="submit" id="submit" class="submit" title="Go" aria-label="Go">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <line x1="8" y1="13" x2="8" y2="3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <polyline points="3.5,7.5 8,3 12.5,7.5" fill="none" stroke="currentColor" stroke-width="1.8"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
-    </section>
+    </form>
 
-    <section class="command-bar">
-      <input id="query" autofocus autocomplete="off" spellcheck="false"
-             placeholder="Search, paste a URL, or ask Deep Search">
-      <button id="open" class="open-button" type="button">Open</button>
-      <button id="deep-search" class="deep-button" type="button">Deep Search</button>
-    </section>
-
-    <section class="shortcuts" aria-label="Shortcuts">
+    <nav class="suggestions" aria-label="Quick links">
       <button data-open="google.com" type="button">Google</button>
       <button data-open="youtube.com" type="button">YouTube</button>
       <button data-open="github.com" type="button">GitHub</button>
-      <button data-open="news.ycombinator.com" type="button">HN</button>
-    </section>
+      <button data-open="news.ycombinator.com" type="button">Hacker News</button>
+    </nav>
   </main>
 
   <script src="Home.js"></script>

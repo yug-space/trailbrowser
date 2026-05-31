@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · TrailBrowser</title>
+  <link rel="stylesheet" href="Settings.css">
+</head>
+<body>
+  <main class="settings">
+    <header class="settings-head">
+      <h1>Settings</h1>
+      <p>Manage how TrailBrowser behaves on this Mac.</p>
+    </header>
+
+    <section class="card">
+      <div class="card-row">
+        <div class="card-text">
+          <h2>Sync cookies from Chrome</h2>
+          <p>
+            Copy cookies from a local Google Chrome profile so you stay signed in
+            to your sites. This also reduces "unusual traffic" checks from sites
+            like Google that distrust signed-out, cookieless sessions.
+          </p>
+          <p class="hint">macOS may ask permission to read "Chrome Safe Storage" from your Keychain.</p>
+        </div>
+        <button id="sync-cookies" class="primary" type="button">Sync Chrome Cookies</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-row">
+        <div class="card-text">
+          <h2>Start page</h2>
+          <p>Open the TrailBrowser home page with search and quick links.</p>
+        </div>
+        <button id="open-home" class="ghost" type="button">Open Home</button>
+      </div>
+    </section>
+
+    <footer class="settings-foot">
+      TrailBrowser · native WebKit browser shell
+    </footer>
+  </main>
+
+  <script src="Settings.js"></script>
+</body>
+</html>

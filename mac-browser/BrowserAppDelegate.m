@@ -1,149 +1,18 @@
-// Browser.m - A small native macOS browser shell written in Objective-C.
+// BrowserAppDelegate.m - The TrailBrowser application controller.
 //
-// This is not a browser engine. It is the native application around Apple's
-// WebKit engine: AppKit draws the window and controls, WKWebView renders pages.
+// AppKit draws the window and controls; WKWebView renders pages. This file
+// owns window construction, navigation, the sidebar tab list, the page
+// assistant (Codex), history/state persistence, and Chrome cookie import.
 
-#import <Cocoa/Cocoa.h>
-#import <WebKit/WebKit.h>
+#import "BrowserAppDelegate.h"
 
+#import <QuartzCore/QuartzCore.h>
+
+#import "BrowserTab.h"
+#import "BrowserTabViews.h"
 #import "ChromeCookieImporter.h"
-
-@interface BrowserTab : NSObject
-@property (nonatomic, strong) WKWebView *webView;
-@property (nonatomic, copy) NSString *title;
-@property (nonatomic, copy) NSString *urlString;
-@property (nonatomic, copy) NSString *lastRecordedURL;
-@property (nonatomic, strong) NSImage *favicon;
-@property (nonatomic, copy) NSString *faviconURLString;
-@property (nonatomic, copy) NSString *pendingFaviconURLString;
-@end
-
-@implementation BrowserTab
-@end
-
-@interface BrowserTabRowView : NSTableRowView
-@end
-
-@implementation BrowserTabRowView
-
-- (void)drawBackgroundInRect:(NSRect)dirtyRect {
-    [super drawBackgroundInRect:dirtyRect];
-    if (!self.selected) return;
-
-    NSRect fillRect = NSInsetRect(self.bounds, 3.0, 4.0);
-    NSBezierPath *fillPath = [NSBezierPath bezierPathWithRoundedRect:fillRect
-                                                             xRadius:7.0
-                                                             yRadius:7.0];
-    [[NSColor colorWithWhite:1.0 alpha:0.10] setFill];
-    [fillPath fill];
-
-    NSRect accentRect = NSMakeRect(NSMinX(fillRect) + 7.0,
-                                   NSMidY(fillRect) - 8.0,
-                                   2.0,
-                                   16.0);
-    NSBezierPath *accentPath = [NSBezierPath bezierPathWithRoundedRect:accentRect
-                                                               xRadius:1.5
-                                                               yRadius:1.5];
-    [NSColor.controlAccentColor setFill];
-    [accentPath fill];
-}
-
-- (void)drawSelectionInRect:(NSRect)dirtyRect {
-    (void)dirtyRect;
-}
-
-@end
-
-@interface BrowserTabCellView : NSTableCellView
-@property (nonatomic, strong) NSImageView *tabIconView;
-@property (nonatomic, strong) NSTextField *titleLabel;
-@property (nonatomic, strong) NSTextField *subtitleLabel;
-@end
-
-@implementation BrowserTabCellView
-@end
-
-@interface AssistantLauncherButton : NSButton
-@end
-
-@implementation AssistantLauncherButton
-
-- (instancetype)initWithFrame:(NSRect)frameRect {
-    self = [super initWithFrame:frameRect];
-    if (self) {
-        self.bordered = NO;
-        self.title = @"AI";
-        self.toolTip = @"Open assistant";
-        self.wantsLayer = YES;
-    }
-    return self;
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    (void)dirtyRect;
-    NSRect bounds = NSInsetRect(self.bounds, 1.0, 1.0);
-    NSBezierPath *shape = [NSBezierPath bezierPathWithOvalInRect:bounds];
-    NSGradient *gradient = [[NSGradient alloc] initWithColors:@[
-        [NSColor colorWithCalibratedRed:0.05 green:0.72 blue:0.91 alpha:1.0],
-        [NSColor colorWithCalibratedRed:0.14 green:0.42 blue:0.96 alpha:1.0],
-        [NSColor colorWithCalibratedRed:0.58 green:0.25 blue:0.94 alpha:1.0]
-    ]];
-    [gradient drawInBezierPath:shape angle:35.0];
-
-    [[NSColor colorWithWhite:1.0 alpha:0.22] setStroke];
-    shape.lineWidth = 1.0;
-    [shape stroke];
-
-    NSDictionary<NSAttributedStringKey, id> *attributes = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:16.0 weight:NSFontWeightBold],
-        NSForegroundColorAttributeName: NSColor.whiteColor
-    };
-    NSAttributedString *label = [[NSAttributedString alloc] initWithString:@"AI"
-                                                                attributes:attributes];
-    NSSize labelSize = label.size;
-    NSRect labelRect = NSMakeRect(NSMidX(self.bounds) - labelSize.width / 2.0,
-                                  NSMidY(self.bounds) - labelSize.height / 2.0,
-                                  labelSize.width,
-                                  labelSize.height);
-    [label drawInRect:labelRect];
-}
-
-@end
-
-@interface BrowserAppDelegate : NSObject <NSApplicationDelegate, NSSearchFieldDelegate, WKNavigationDelegate, WKUIDelegate, NSTableViewDataSource, NSTableViewDelegate>
-@property (nonatomic, strong) NSWindow *window;
-@property (nonatomic, strong) WKWebView *webView;
-@property (nonatomic, strong) NSView *webContainer;
-@property (nonatomic, strong) NSVisualEffectView *sidebar;
-@property (nonatomic, strong) NSBox *sidebarSeparator;
-@property (nonatomic, strong) NSTableView *tabTable;
-@property (nonatomic, strong) NSMutableArray<BrowserTab *> *tabs;
-@property (nonatomic, strong) NSSearchField *addressField;
-@property (nonatomic, strong) NSButton *backButton;
-@property (nonatomic, strong) NSButton *forwardButton;
-@property (nonatomic, strong) NSButton *sidebarToggleButton;
-@property (nonatomic, strong) NSButton *reloadButton;
-@property (nonatomic, strong) NSButton *homeButton;
-@property (nonatomic, strong) NSButton *addTabButton;
-@property (nonatomic, strong) NSButton *closeTabButton;
-@property (nonatomic, strong) NSProgressIndicator *progressBar;
-@property (nonatomic, strong) NSTextField *statusLabel;
-@property (nonatomic, strong) NSVisualEffectView *assistantBar;
-@property (nonatomic, strong) NSSegmentedControl *assistantModeControl;
-@property (nonatomic, strong) NSTextField *assistantPromptField;
-@property (nonatomic, strong) NSButton *assistantRunButton;
-@property (nonatomic, strong) NSProgressIndicator *assistantSpinner;
-@property (nonatomic, strong) NSVisualEffectView *assistantResultPanel;
-@property (nonatomic, strong) NSTextView *assistantResultTextView;
-@property (nonatomic, strong) NSButton *assistantResultCloseButton;
-@property (nonatomic, strong) AssistantLauncherButton *assistantLauncherButton;
-@property (nonatomic, strong) NSButton *assistantCollapseButton;
-@property (nonatomic, strong) NSLayoutConstraint *sidebarWidthConstraint;
-@property (nonatomic, copy) NSString *lastRecordedURL;
-@property (nonatomic, assign) NSInteger activeTabIndex;
-@property (nonatomic, assign) BOOL userEditingAddress;
-@property (nonatomic, assign) BOOL sidebarVisible;
-@end
+#import "TBControls.h"
+#import "TBTheme.h"
 
 @implementation BrowserAppDelegate
 
@@ -187,6 +56,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [mainMenu addItem:appMenuItem];
 
     NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"TrailBrowser"];
+    [self addMenuItem:@"Settings…" action:@selector(openSettings:) key:@"," menu:appMenu];
     [self addMenuItem:@"Import Cookies from Chrome…"
                action:@selector(importChromeCookies:)
                   key:@""
@@ -252,16 +122,25 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
     [self.window center];
 
+    self.window.backgroundColor = TBBg();
+    self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+
     NSView *root = [[NSView alloc] initWithFrame:NSZeroRect];
     root.translatesAutoresizingMaskIntoConstraints = NO;
+    root.wantsLayer = YES;
+    root.layer.backgroundColor = TBBg().CGColor;
     self.window.contentView = root;
 
-    NSVisualEffectView *toolbar = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    // Toolbar: flat near-black surface with a hairline bottom border.
+    NSView *toolbar = [[NSView alloc] initWithFrame:NSZeroRect];
     toolbar.translatesAutoresizingMaskIntoConstraints = NO;
-    toolbar.material = NSVisualEffectMaterialHeaderView;
-    toolbar.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-    toolbar.state = NSVisualEffectStateActive;
+    toolbar.wantsLayer = YES;
+    toolbar.layer.backgroundColor = TBSurface().CGColor;
+    self.toolbar = toolbar;
     [root addSubview:toolbar];
+
+    NSView *toolbarHairline = [self hairlineView];
+    [toolbar addSubview:toolbarHairline];
 
     self.backButton = [self toolbarButtonWithSymbol:@"chevron.left"
                                            fallback:@"<"
@@ -279,67 +158,106 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                              fallback:@"R"
                                               tooltip:@"Reload"
                                                action:@selector(reloadPage:)];
-    self.homeButton = [self toolbarButtonWithSymbol:@"house"
-                                           fallback:@"H"
-                                            tooltip:@"Home"
-                                             action:@selector(goHome:)];
 
-    self.addressField = [[NSSearchField alloc] initWithFrame:NSZeroRect];
+    // Address bar: a rounded "pill" container holding a leading glyph + field.
+    self.addressContainer = [[TBFieldContainer alloc] initWithFrame:NSZeroRect];
+    self.addressContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [toolbar addSubview:self.addressContainer];
+
+    NSImageView *addressIcon = [[NSImageView alloc] initWithFrame:NSZeroRect];
+    addressIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    addressIcon.imageScaling = NSImageScaleProportionallyDown;
+    if (@available(macOS 11.0, *)) {
+        NSImage *glyph = [NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:@"Search"];
+        glyph.template = YES;
+        addressIcon.image = glyph;
+    }
+    if (@available(macOS 10.14, *)) addressIcon.contentTintColor = TBFaint();
+    [self.addressContainer addSubview:addressIcon];
+
+    self.addressField = [[NSTextField alloc] initWithFrame:NSZeroRect];
     self.addressField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.addressField.placeholderString = @"Search or enter website name";
+    self.addressField.bezeled = NO;
+    self.addressField.bordered = NO;
+    self.addressField.drawsBackground = NO;
+    self.addressField.focusRingType = NSFocusRingTypeNone;
+    self.addressField.editable = YES;
+    self.addressField.selectable = YES;
+    self.addressField.textColor = TBText();
+    self.addressField.font = [NSFont systemFontOfSize:13.5 weight:NSFontWeightRegular];
+    self.addressField.placeholderAttributedString =
+        [[NSAttributedString alloc] initWithString:@"Search or enter website name"
+                                        attributes:@{ NSForegroundColorAttributeName: TBFaint(),
+                                                      NSFontAttributeName: [NSFont systemFontOfSize:13.5 weight:NSFontWeightRegular] }];
     self.addressField.delegate = self;
     self.addressField.target = self;
     self.addressField.action = @selector(loadFromAddressField:);
-    self.addressField.sendsSearchStringImmediately = NO;
-    self.addressField.sendsWholeSearchString = YES;
-    self.addressField.font = [NSFont systemFontOfSize:15.0 weight:NSFontWeightRegular];
-    self.addressField.controlSize = NSControlSizeRegular;
+    if (@available(macOS 10.12.2, *)) self.addressField.allowsCharacterPickerTouchBarItem = NO;
+    [self.addressContainer addSubview:self.addressField];
+
+    // Status pill (dot + label) on the trailing edge of the toolbar.
+    self.statusDot = [[NSView alloc] initWithFrame:NSZeroRect];
+    self.statusDot.translatesAutoresizingMaskIntoConstraints = NO;
+    self.statusDot.wantsLayer = YES;
+    self.statusDot.layer.cornerRadius = 3.0;
+    self.statusDot.layer.backgroundColor = TBOk().CGColor;
+    [toolbar addSubview:self.statusDot];
 
     self.statusLabel = [NSTextField labelWithString:@"Ready"];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusLabel.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
-    self.statusLabel.textColor = NSColor.secondaryLabelColor;
-    self.statusLabel.alignment = NSTextAlignmentRight;
+    self.statusLabel.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
+    self.statusLabel.textColor = TBMuted();
+    self.statusLabel.alignment = NSTextAlignmentLeft;
 
-    self.progressBar = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+    // Accent "Ask" button — the prominent primary action, like the reference RUN.
+    self.askButton = [[TBPillButton alloc] initWithFrame:NSZeroRect];
+    self.askButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.askButton.pillStyle = TBPillStyleAccent;
+    self.askButton.title = @"Ask";
+    self.askButton.toolTip = @"Open assistant";
+    self.askButton.target = self;
+    self.askButton.action = @selector(openAssistant:);
+    [toolbar addSubview:self.askButton];
+
+    self.progressBar = [[TBProgressBar alloc] initWithFrame:NSZeroRect];
     self.progressBar.translatesAutoresizingMaskIntoConstraints = NO;
-    self.progressBar.indeterminate = NO;
-    self.progressBar.minValue = 0.0;
-    self.progressBar.maxValue = 1.0;
-    self.progressBar.doubleValue = 0.0;
     self.progressBar.hidden = YES;
-    self.progressBar.controlSize = NSControlSizeSmall;
+    [toolbar addSubview:self.progressBar];
 
     NSView *contentArea = [[NSView alloc] initWithFrame:NSZeroRect];
     contentArea.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:contentArea];
 
-    self.sidebar = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    // Sidebar: flat surface (no vibrancy) with a hairline trailing separator.
+    self.sidebar = [[NSView alloc] initWithFrame:NSZeroRect];
     self.sidebar.translatesAutoresizingMaskIntoConstraints = NO;
-    self.sidebar.material = NSVisualEffectMaterialSidebar;
-    self.sidebar.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-    self.sidebar.state = NSVisualEffectStateActive;
+    self.sidebar.wantsLayer = YES;
+    self.sidebar.layer.backgroundColor = TBSurface().CGColor;
     [contentArea addSubview:self.sidebar];
 
-    self.sidebarSeparator = [[NSBox alloc] initWithFrame:NSZeroRect];
-    self.sidebarSeparator.translatesAutoresizingMaskIntoConstraints = NO;
-    self.sidebarSeparator.boxType = NSBoxSeparator;
+    self.sidebarSeparator = [self hairlineView];
     [contentArea addSubview:self.sidebarSeparator];
 
     self.webContainer = [[NSView alloc] initWithFrame:NSZeroRect];
     self.webContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    self.webContainer.wantsLayer = YES;
+    self.webContainer.layer.backgroundColor = TBBg().CGColor;
     [contentArea addSubview:self.webContainer];
     [self buildAssistantOverlay];
 
+    // TABS section header with a live count badge.
     NSView *tabHeader = [[NSView alloc] initWithFrame:NSZeroRect];
     tabHeader.translatesAutoresizingMaskIntoConstraints = NO;
     [self.sidebar addSubview:tabHeader];
 
-    NSTextField *tabTitle = [NSTextField labelWithString:@"Tabs"];
-    tabTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    tabTitle.font = [NSFont systemFontOfSize:14.0 weight:NSFontWeightSemibold];
-    tabTitle.textColor = NSColor.secondaryLabelColor;
+    NSTextField *tabTitle = [self sectionHeaderLabel:@"TABS"];
     [tabHeader addSubview:tabTitle];
+
+    self.tabCountLabel = [NSTextField labelWithString:@"0"];
+    self.tabCountLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tabCountLabel.font = [NSFont monospacedDigitSystemFontOfSize:11.0 weight:NSFontWeightSemibold];
+    self.tabCountLabel.textColor = TBFaint();
+    [tabHeader addSubview:self.tabCountLabel];
 
     self.addTabButton = [self sidebarButtonWithSymbol:@"plus"
                                              fallback:@"+"
@@ -357,13 +275,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabTable.headerView = nil;
     self.tabTable.rowHeight = 46.0;
     self.tabTable.intercellSpacing = NSMakeSize(0, 2);
-    self.tabTable.selectionHighlightStyle = NSTableViewSelectionHighlightStyleRegular;
+    self.tabTable.selectionHighlightStyle = NSTableViewSelectionHighlightStyleNone;
     self.tabTable.backgroundColor = NSColor.clearColor;
     self.tabTable.usesAlternatingRowBackgroundColors = NO;
     self.tabTable.allowsEmptySelection = NO;
     self.tabTable.focusRingType = NSFocusRingTypeNone;
     self.tabTable.dataSource = self;
     self.tabTable.delegate = self;
+    // macOS 11+ defaults to an inset "automatic" style that pads rows heavily;
+    // plain keeps cells flush so they align with the section headers.
+    if (@available(macOS 11.0, *)) self.tabTable.style = NSTableViewStylePlain;
 
     NSTableColumn *tabColumn = [[NSTableColumn alloc] initWithIdentifier:@"TabColumn"];
     tabColumn.resizingMask = NSTableColumnAutoresizingMask;
@@ -380,12 +301,46 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     tabScrollView.drawsBackground = NO;
     [self.sidebar addSubview:tabScrollView];
 
-    for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton, self.homeButton,
-                           self.addressField, self.reloadButton, self.statusLabel, self.progressBar ]) {
+    // Sidebar bottom: SHORTCUTS — a clean vertical list of quick links.
+    NSTextField *shortcutsTitle = [self sectionHeaderLabel:@"SHORTCUTS"];
+    [self.sidebar addSubview:shortcutsTitle];
+
+    NSStackView *shortcuts = [NSStackView stackViewWithViews:@[
+        [self shortcutRowWithLabel:@"Google" url:@"google.com"],
+        [self shortcutRowWithLabel:@"YouTube" url:@"youtube.com"],
+        [self shortcutRowWithLabel:@"GitHub" url:@"github.com"],
+        [self shortcutRowWithLabel:@"Hacker News" url:@"news.ycombinator.com"]
+    ]];
+    shortcuts.translatesAutoresizingMaskIntoConstraints = NO;
+    shortcuts.orientation = NSUserInterfaceLayoutOrientationVertical;
+    shortcuts.alignment = NSLayoutAttributeLeading;
+    shortcuts.distribution = NSStackViewDistributionFill;
+    shortcuts.spacing = 1.0;
+    [self.sidebar addSubview:shortcuts];
+
+    // Bottom: a Settings-style row that syncs (imports) cookies from Chrome.
+    NSView *settingsDivider = [self hairlineView];
+    [self.sidebar addSubview:settingsDivider];
+
+    TBFlatButton *settingsRow = [self sidebarRowWithSymbol:@"gearshape"
+                                                     title:@"Settings"
+                                                    action:@selector(openSettings:)];
+    [self.sidebar addSubview:settingsRow];
+
+    for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton,
+                           self.addressContainer, self.reloadButton, self.statusDot, self.statusLabel,
+                           self.askButton, self.progressBar ]) {
         [toolbar addSubview:view];
     }
 
-    self.sidebarWidthConstraint = [self.sidebar.widthAnchor constraintEqualToConstant:220.0];
+    self.sidebarWidthConstraint = [self.sidebar.widthAnchor constraintEqualToConstant:240.0];
+
+    // Center the address bar in the toolbar (like the reference), but let it
+    // yield and shrink before it would overlap the flanking control clusters.
+    NSLayoutConstraint *addressCenter = [self.addressContainer.centerXAnchor constraintEqualToAnchor:toolbar.centerXAnchor];
+    addressCenter.priority = NSLayoutPriorityDefaultHigh - 1;
+    NSLayoutConstraint *addressWidth = [self.addressContainer.widthAnchor constraintEqualToConstant:440.0];
+    addressWidth.priority = NSLayoutPriorityDefaultHigh;
 
     [NSLayoutConstraint activateConstraints:@[
         [toolbar.topAnchor constraintEqualToAnchor:root.topAnchor],
@@ -393,27 +348,54 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [toolbar.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
         [toolbar.heightAnchor constraintEqualToConstant:54.0],
 
+        [toolbarHairline.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor],
+        [toolbarHairline.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor],
+        [toolbarHairline.bottomAnchor constraintEqualToAnchor:toolbar.bottomAnchor],
+        [toolbarHairline.heightAnchor constraintEqualToConstant:1.0],
+
+        // Left cluster: sidebar toggle + back/forward.
         [self.sidebarToggleButton.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor constant:88.0],
         [self.sidebarToggleButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
-        [self.backButton.leadingAnchor constraintEqualToAnchor:self.sidebarToggleButton.trailingAnchor constant:8.0],
-        [self.backButton.centerYAnchor constraintEqualToAnchor:self.sidebarToggleButton.centerYAnchor],
-        [self.forwardButton.leadingAnchor constraintEqualToAnchor:self.backButton.trailingAnchor constant:8.0],
-        [self.forwardButton.centerYAnchor constraintEqualToAnchor:self.backButton.centerYAnchor],
-        [self.homeButton.leadingAnchor constraintEqualToAnchor:self.forwardButton.trailingAnchor constant:8.0],
-        [self.homeButton.centerYAnchor constraintEqualToAnchor:self.backButton.centerYAnchor],
+        [self.backButton.leadingAnchor constraintEqualToAnchor:self.sidebarToggleButton.trailingAnchor constant:10.0],
+        [self.backButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        [self.forwardButton.leadingAnchor constraintEqualToAnchor:self.backButton.trailingAnchor constant:6.0],
+        [self.forwardButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
-        [self.addressField.leadingAnchor constraintEqualToAnchor:self.homeButton.trailingAnchor constant:14.0],
-        [self.addressField.centerYAnchor constraintEqualToAnchor:self.backButton.centerYAnchor],
-        [self.addressField.heightAnchor constraintEqualToConstant:32.0],
+        // Centered address bar.
+        addressCenter,
+        addressWidth,
+        [self.addressContainer.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.forwardButton.trailingAnchor constant:16.0],
+        [self.addressContainer.trailingAnchor constraintLessThanOrEqualToAnchor:self.reloadButton.leadingAnchor constant:-16.0],
+        [self.addressContainer.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        [self.addressContainer.heightAnchor constraintEqualToConstant:34.0],
 
-        [self.reloadButton.leadingAnchor constraintEqualToAnchor:self.addressField.trailingAnchor constant:8.0],
-        [self.reloadButton.centerYAnchor constraintEqualToAnchor:self.addressField.centerYAnchor],
+        [addressIcon.leadingAnchor constraintEqualToAnchor:self.addressContainer.leadingAnchor constant:12.0],
+        [addressIcon.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
+        [addressIcon.widthAnchor constraintEqualToConstant:14.0],
+        [addressIcon.heightAnchor constraintEqualToConstant:14.0],
 
-        [self.statusLabel.leadingAnchor constraintEqualToAnchor:self.reloadButton.trailingAnchor constant:12.0],
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-20.0],
-        [self.statusLabel.centerYAnchor constraintEqualToAnchor:self.addressField.centerYAnchor],
-        [self.statusLabel.widthAnchor constraintEqualToConstant:58.0],
+        [self.addressField.leadingAnchor constraintEqualToAnchor:addressIcon.trailingAnchor constant:8.0],
+        [self.addressField.trailingAnchor constraintEqualToAnchor:self.addressContainer.trailingAnchor constant:-12.0],
+        [self.addressField.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
+
+        // Right cluster: reload · status pill · Ask, anchored from the trailing edge.
+        [self.askButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-16.0],
+        [self.askButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        [self.askButton.widthAnchor constraintEqualToConstant:56.0],
+        [self.askButton.heightAnchor constraintEqualToConstant:30.0],
+
+        [self.statusLabel.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-10.0],
+        [self.statusLabel.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        [self.statusLabel.widthAnchor constraintEqualToConstant:54.0],
+
+        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.statusLabel.leadingAnchor constant:-6.0],
+        [self.statusDot.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        [self.statusDot.widthAnchor constraintEqualToConstant:6.0],
+        [self.statusDot.heightAnchor constraintEqualToConstant:6.0],
+
+        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.statusDot.leadingAnchor constant:-12.0],
+        [self.reloadButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
         [self.progressBar.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor],
         [self.progressBar.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor],
@@ -440,27 +422,46 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.webContainer.trailingAnchor constraintEqualToAnchor:contentArea.trailingAnchor],
         [self.webContainer.bottomAnchor constraintEqualToAnchor:contentArea.bottomAnchor],
 
-        [tabHeader.topAnchor constraintEqualToAnchor:self.sidebar.topAnchor constant:12.0],
-        [tabHeader.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:12.0],
+        [tabHeader.topAnchor constraintEqualToAnchor:self.sidebar.topAnchor constant:16.0],
+        [tabHeader.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:18.0],
         [tabHeader.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-12.0],
-        [tabHeader.heightAnchor constraintEqualToConstant:32.0],
+        [tabHeader.heightAnchor constraintEqualToConstant:24.0],
 
         [tabTitle.leadingAnchor constraintEqualToAnchor:tabHeader.leadingAnchor],
         [tabTitle.centerYAnchor constraintEqualToAnchor:tabHeader.centerYAnchor],
-        [tabTitle.trailingAnchor constraintLessThanOrEqualToAnchor:self.addTabButton.leadingAnchor constant:-8.0],
+
+        [self.tabCountLabel.leadingAnchor constraintEqualToAnchor:tabTitle.trailingAnchor constant:8.0],
+        [self.tabCountLabel.centerYAnchor constraintEqualToAnchor:tabHeader.centerYAnchor],
 
         [self.closeTabButton.trailingAnchor constraintEqualToAnchor:tabHeader.trailingAnchor],
         [self.closeTabButton.centerYAnchor constraintEqualToAnchor:tabHeader.centerYAnchor],
 
-        [self.addTabButton.trailingAnchor constraintEqualToAnchor:self.closeTabButton.leadingAnchor constant:-8.0],
+        [self.addTabButton.trailingAnchor constraintEqualToAnchor:self.closeTabButton.leadingAnchor constant:-4.0],
         [self.addTabButton.centerYAnchor constraintEqualToAnchor:tabHeader.centerYAnchor],
 
         [tabScrollView.topAnchor constraintEqualToAnchor:tabHeader.bottomAnchor constant:6.0],
         [tabScrollView.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:8.0],
         [tabScrollView.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-8.0],
-        [tabScrollView.bottomAnchor constraintEqualToAnchor:self.sidebar.bottomAnchor constant:-10.0]
+        [tabScrollView.bottomAnchor constraintEqualToAnchor:shortcutsTitle.topAnchor constant:-10.0],
+
+        [shortcutsTitle.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:18.0],
+        [shortcutsTitle.bottomAnchor constraintEqualToAnchor:shortcuts.topAnchor constant:-8.0],
+
+        [shortcuts.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:16.0],
+        [shortcuts.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-12.0],
+        [shortcuts.bottomAnchor constraintEqualToAnchor:settingsDivider.topAnchor constant:-12.0],
+
+        [settingsDivider.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:12.0],
+        [settingsDivider.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-12.0],
+        [settingsDivider.heightAnchor constraintEqualToConstant:1.0],
+        [settingsDivider.bottomAnchor constraintEqualToAnchor:settingsRow.topAnchor constant:-8.0],
+
+        [settingsRow.leadingAnchor constraintEqualToAnchor:self.sidebar.leadingAnchor constant:16.0],
+        [settingsRow.trailingAnchor constraintEqualToAnchor:self.sidebar.trailingAnchor constant:-12.0],
+        [settingsRow.bottomAnchor constraintEqualToAnchor:self.sidebar.bottomAnchor constant:-14.0]
     ]];
 
+    [self updateTabCount];
     [self updateControls];
     self.window.initialFirstResponder = self.addressField;
     [self.window makeKeyAndOrderFront:nil];
@@ -470,14 +471,129 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self.window makeFirstResponder:self.addressField];
 }
 
+- (NSView *)hairlineView {
+    NSView *line = [[NSView alloc] initWithFrame:NSZeroRect];
+    line.translatesAutoresizingMaskIntoConstraints = NO;
+    line.wantsLayer = YES;
+    line.layer.backgroundColor = TBBorder().CGColor;
+    return line;
+}
+
+- (NSTextField *)sectionHeaderLabel:(NSString *)text {
+    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+    NSAttributedString *attributed = [[NSAttributedString alloc] initWithString:text attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:11.0 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: TBMuted(),
+        NSKernAttributeName: @(0.6),
+        NSParagraphStyleAttributeName: paragraph
+    }];
+    NSTextField *label = [NSTextField labelWithAttributedString:attributed];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    return label;
+}
+
+- (TBFlatButton *)sidebarRowWithSymbol:(NSString *)symbol title:(NSString *)title action:(SEL)action {
+    TBFlatButton *button = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.cornerRadius = 8.0;
+    button.target = self;
+    button.action = action;
+    button.imagePosition = NSImageLeft;
+    button.imageScaling = NSImageScaleProportionallyDown;
+    button.imageHugsTitle = YES;
+    button.alignment = NSTextAlignmentLeft;
+    button.toolTip = title;
+
+    if (@available(macOS 11.0, *)) {
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:title];
+        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:13.0
+                                                                                             weight:NSFontWeightMedium];
+        image = [image imageWithSymbolConfiguration:config] ?: image;
+        image.template = YES;
+        button.image = image;
+    }
+    if (@available(macOS 10.14, *)) button.contentTintColor = TBMuted();
+
+    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+    paragraph.alignment = NSTextAlignmentLeft;
+    button.attributedTitle = [[NSAttributedString alloc] initWithString:[@"   " stringByAppendingString:title]
+                                                             attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName: TBText(),
+        NSParagraphStyleAttributeName: paragraph
+    }];
+
+    [button.heightAnchor constraintEqualToConstant:34.0].active = YES;
+    [button.widthAnchor constraintGreaterThanOrEqualToConstant:200.0].active = YES;
+    return button;
+}
+
+- (TBFlatButton *)shortcutRowWithLabel:(NSString *)label url:(NSString *)url {
+    TBFlatButton *row = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    row.cornerRadius = 7.0;
+    row.target = self;
+    row.action = @selector(openShortcut:);
+    row.identifier = url;
+    row.toolTip = url;
+    row.imagePosition = NSImageLeft;
+    row.imageScaling = NSImageScaleProportionallyDown;
+    row.imageHugsTitle = YES;
+    row.alignment = NSTextAlignmentLeft;
+
+    if (@available(macOS 11.0, *)) {
+        NSImage *image = [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:label];
+        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:11.0
+                                                                                             weight:NSFontWeightMedium];
+        image = [image imageWithSymbolConfiguration:config] ?: image;
+        image.template = YES;
+        row.image = image;
+    }
+    if (@available(macOS 10.14, *)) row.contentTintColor = TBFaint();
+
+    row.attributedTitle = [[NSAttributedString alloc] initWithString:[@"   " stringByAppendingString:label]
+                                                          attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName: TBMuted()
+    }];
+
+    [row.heightAnchor constraintEqualToConstant:30.0].active = YES;
+    [row.widthAnchor constraintGreaterThanOrEqualToConstant:160.0].active = YES;
+    return row;
+}
+
+- (void)openShortcut:(id)sender {
+    NSString *url = [sender identifier];
+    if (url.length > 0) [self loadURLString:url];
+}
+
+- (void)updateTabCount {
+    self.tabCountLabel.stringValue = [NSString stringWithFormat:@"%lu", (unsigned long)self.tabs.count];
+}
+
+// Drive the toolbar status pill: dot color + short label.
+- (void)setStatusText:(NSString *)text {
+    self.statusLabel.stringValue = text ?: @"";
+    NSColor *dotColor = TBMuted();
+    if ([text isEqualToString:@"Ready"]) {
+        dotColor = TBOk();
+    } else if ([text isEqualToString:@"Loading"]) {
+        dotColor = TBAccent();
+    } else if (text.length > 0) {
+        dotColor = TBError();
+    }
+    self.statusDot.layer.backgroundColor = dotColor.CGColor;
+}
+
 - (NSButton *)toolbarButtonWithSymbol:(NSString *)symbol
                              fallback:(NSString *)fallback
                               tooltip:(NSString *)tooltip
                                action:(SEL)action {
-    NSButton *button = [NSButton buttonWithTitle:@"" target:self action:action];
+    TBFlatButton *button = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
     button.translatesAutoresizingMaskIntoConstraints = NO;
-    button.bezelStyle = NSBezelStyleRounded;
-    [button setButtonType:NSButtonTypeMomentaryPushIn];
+    button.target = self;
+    button.action = action;
+    button.cornerRadius = 7.0;
     button.imagePosition = NSImageOnly;
     button.imageScaling = NSImageScaleProportionallyDown;
     button.toolTip = tooltip;
@@ -490,15 +606,18 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         image.template = YES;
         button.image = image;
     }
+    if (@available(macOS 10.14, *)) button.contentTintColor = TBMuted();
 
     if (!button.image) {
-        button.title = fallback;
         button.imagePosition = NSNoImage;
-        button.font = [NSFont systemFontOfSize:14.0 weight:NSFontWeightSemibold];
+        button.attributedTitle = [[NSAttributedString alloc] initWithString:fallback attributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:14.0 weight:NSFontWeightSemibold],
+            NSForegroundColorAttributeName: TBMuted()
+        }];
     }
 
-    [button.widthAnchor constraintEqualToConstant:36.0].active = YES;
-    [button.heightAnchor constraintEqualToConstant:32.0].active = YES;
+    [button.widthAnchor constraintEqualToConstant:32.0].active = YES;
+    [button.heightAnchor constraintEqualToConstant:30.0].active = YES;
     return button;
 }
 
@@ -506,31 +625,35 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                               fallback:(NSString *)fallback
                                tooltip:(NSString *)tooltip
                                 action:(SEL)action {
-    NSButton *button = [NSButton buttonWithTitle:@"" target:self action:action];
+    TBFlatButton *button = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
     button.translatesAutoresizingMaskIntoConstraints = NO;
-    button.bezelStyle = NSBezelStyleRounded;
-    [button setButtonType:NSButtonTypeMomentaryPushIn];
+    button.target = self;
+    button.action = action;
+    button.cornerRadius = 6.0;
     button.imagePosition = NSImageOnly;
     button.imageScaling = NSImageScaleProportionallyDown;
     button.toolTip = tooltip;
 
     if (@available(macOS 11.0, *)) {
         NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tooltip];
-        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:13.0
+        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:12.0
                                                                                              weight:NSFontWeightSemibold];
         image = [image imageWithSymbolConfiguration:config] ?: image;
         image.template = YES;
         button.image = image;
     }
+    if (@available(macOS 10.14, *)) button.contentTintColor = TBMuted();
 
     if (!button.image) {
-        button.title = fallback;
         button.imagePosition = NSNoImage;
-        button.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightSemibold];
+        button.attributedTitle = [[NSAttributedString alloc] initWithString:fallback attributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightSemibold],
+            NSForegroundColorAttributeName: TBMuted()
+        }];
     }
 
-    [button.widthAnchor constraintEqualToConstant:32.0].active = YES;
-    [button.heightAnchor constraintEqualToConstant:28.0].active = YES;
+    [button.widthAnchor constraintEqualToConstant:26.0].active = YES;
+    [button.heightAnchor constraintEqualToConstant:24.0].active = YES;
     return button;
 }
 
@@ -545,8 +668,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantBar.layer.cornerRadius = 14.0;
     self.assistantBar.layer.masksToBounds = YES;
     self.assistantBar.layer.borderWidth = 1.0;
-    self.assistantBar.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.18].CGColor;
-    self.assistantBar.layer.backgroundColor = [NSColor colorWithCalibratedWhite:0.08 alpha:0.88].CGColor;
+    self.assistantBar.layer.borderColor = TBBorder().CGColor;
+    self.assistantBar.layer.backgroundColor = TBSurface().CGColor;
     self.assistantBar.hidden = YES;
     [self.webContainer addSubview:self.assistantBar];
 
@@ -568,7 +691,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantPromptField.placeholderString = @"Ask about this page";
     self.assistantPromptField.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular];
     self.assistantPromptField.controlSize = NSControlSizeRegular;
-    self.assistantPromptField.textColor = NSColor.labelColor;
+    self.assistantPromptField.bezeled = NO;
+    self.assistantPromptField.bordered = NO;
+    self.assistantPromptField.drawsBackground = NO;
+    self.assistantPromptField.focusRingType = NSFocusRingTypeNone;
+    self.assistantPromptField.textColor = TBText();
+    self.assistantPromptField.placeholderAttributedString =
+        [[NSAttributedString alloc] initWithString:@"Ask about this page"
+                                        attributes:@{ NSForegroundColorAttributeName: TBFaint(),
+                                                      NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular] }];
     self.assistantPromptField.target = self;
     self.assistantPromptField.action = @selector(runPageAssistant:);
     [self.assistantBar addSubview:self.assistantPromptField];
@@ -585,6 +716,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                                    fallback:@"Go"
                                                     tooltip:@"Run"
                                                      action:@selector(runPageAssistant:)];
+    if (@available(macOS 10.14, *)) self.assistantRunButton.contentTintColor = TBAccent();
     [self.assistantBar addSubview:self.assistantRunButton];
 
     self.assistantCollapseButton = [self sidebarButtonWithSymbol:@"xmark"
@@ -604,15 +736,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantResultPanel.layer.cornerRadius = 14.0;
     self.assistantResultPanel.layer.masksToBounds = YES;
     self.assistantResultPanel.layer.borderWidth = 1.0;
-    self.assistantResultPanel.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.18].CGColor;
-    self.assistantResultPanel.layer.backgroundColor = [NSColor colorWithCalibratedWhite:0.08 alpha:0.92].CGColor;
+    self.assistantResultPanel.layer.borderColor = TBBorder().CGColor;
+    self.assistantResultPanel.layer.backgroundColor = TBSurface().CGColor;
     [self.webContainer addSubview:self.assistantResultPanel positioned:NSWindowBelow relativeTo:self.assistantBar];
-
-    self.assistantLauncherButton = [[AssistantLauncherButton alloc] initWithFrame:NSZeroRect];
-    self.assistantLauncherButton.translatesAutoresizingMaskIntoConstraints = NO;
-    self.assistantLauncherButton.target = self;
-    self.assistantLauncherButton.action = @selector(openAssistant:);
-    [self.webContainer addSubview:self.assistantLauncherButton positioned:NSWindowAbove relativeTo:self.assistantBar];
 
     self.assistantResultCloseButton = [self sidebarButtonWithSymbol:@"xmark"
                                                            fallback:@"x"
@@ -634,7 +760,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantResultTextView.selectable = YES;
     self.assistantResultTextView.drawsBackground = NO;
     self.assistantResultTextView.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular];
-    self.assistantResultTextView.textColor = NSColor.labelColor;
+    self.assistantResultTextView.textColor = TBText();
     self.assistantResultTextView.textContainerInset = NSMakeSize(0.0, 2.0);
     resultScrollView.documentView = self.assistantResultTextView;
 
@@ -667,11 +793,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.assistantRunButton.leadingAnchor constraintEqualToAnchor:self.assistantCollapseButton.trailingAnchor constant:8.0],
         [self.assistantRunButton.trailingAnchor constraintEqualToAnchor:self.assistantBar.trailingAnchor constant:-10.0],
         [self.assistantRunButton.centerYAnchor constraintEqualToAnchor:self.assistantBar.centerYAnchor],
-
-        [self.assistantLauncherButton.trailingAnchor constraintEqualToAnchor:self.webContainer.trailingAnchor constant:-24.0],
-        [self.assistantLauncherButton.bottomAnchor constraintEqualToAnchor:self.webContainer.bottomAnchor constant:-24.0],
-        [self.assistantLauncherButton.widthAnchor constraintEqualToConstant:58.0],
-        [self.assistantLauncherButton.heightAnchor constraintEqualToConstant:58.0],
 
         [self.assistantResultPanel.centerXAnchor constraintEqualToAnchor:self.assistantBar.centerXAnchor],
         [self.assistantResultPanel.widthAnchor constraintEqualToAnchor:self.assistantBar.widthAnchor],
@@ -713,7 +834,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (self.assistantResultPanel) {
         [self.webContainer addSubview:self.assistantResultPanel positioned:NSWindowAbove relativeTo:webView];
         [self.webContainer addSubview:self.assistantBar positioned:NSWindowAbove relativeTo:self.assistantResultPanel];
-        [self.webContainer addSubview:self.assistantLauncherButton positioned:NSWindowAbove relativeTo:self.assistantBar];
     }
 
     [self addObserversToWebView:webView];
@@ -770,6 +890,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (configuration) tab.webView = [self createWebViewWithConfiguration:configuration];
     [self.tabs addObject:tab];
     [self.tabTable reloadData];
+    [self updateTabCount];
 
     NSInteger index = (NSInteger)self.tabs.count - 1;
     if (select) [self selectTabAtIndex:index];
@@ -839,6 +960,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (self.webView.URL == nil && tab.urlString.length > 0) {
         if ([self isHomeURLString:tab.urlString]) {
             [self loadNativeHomePageInWebView:self.webView];
+        } else if ([self isSettingsURLString:tab.urlString]) {
+            [self loadNativeSettingsPageInWebView:self.webView];
         } else {
             NSURL *url = [self URLForUserInput:tab.urlString];
             if (url) [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
@@ -851,8 +974,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         self.addressField.stringValue = tab.urlString;
     }
     [self updateControls];
-    self.statusLabel.stringValue = self.webView.loading ? @"Loading" : @"Ready";
-    self.progressBar.doubleValue = self.webView.estimatedProgress;
+    [self setStatusText:self.webView.loading ? @"Loading" : @"Ready"];
+    self.progressBar.progress = self.webView.estimatedProgress;
     self.progressBar.hidden = !self.webView.loading || self.webView.estimatedProgress >= 1.0;
 }
 
@@ -863,28 +986,46 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)closeCurrentTab:(id)sender {
     (void)sender;
-    if (self.tabs.count == 0) return;
+    [self closeTabAtIndex:self.activeTabIndex];
+}
 
-    NSInteger closingIndex = self.activeTabIndex;
+- (void)closeTabAtIndex:(NSInteger)closingIndex {
+    if (self.tabs.count == 0) return;
+    if (closingIndex < 0 || closingIndex >= (NSInteger)self.tabs.count) closingIndex = self.activeTabIndex;
     if (closingIndex < 0 || closingIndex >= (NSInteger)self.tabs.count) closingIndex = 0;
+
+    BOOL closingActive = (closingIndex == self.activeTabIndex);
     BrowserTab *closingTab = self.tabs[(NSUInteger)closingIndex];
 
     [self removeObserversFromWebView:closingTab.webView];
     [closingTab.webView stopLoading];
     [closingTab.webView removeFromSuperview];
     [self.tabs removeObjectAtIndex:(NSUInteger)closingIndex];
-    [self.tabTable reloadData];
-
-    self.webView = nil;
-    self.activeTabIndex = -1;
+    [self updateTabCount];
 
     if (self.tabs.count == 0) {
+        self.webView = nil;
+        self.activeTabIndex = -1;
+        [self.tabTable reloadData];
         [self newTabWithURLString:[self homeURLString] select:YES];
         return;
     }
 
-    NSInteger nextIndex = MIN(closingIndex, (NSInteger)self.tabs.count - 1);
-    [self selectTabAtIndex:nextIndex];
+    if (closingActive) {
+        self.webView = nil;
+        self.activeTabIndex = -1;
+        [self.tabTable reloadData];
+        NSInteger nextIndex = MIN(closingIndex, (NSInteger)self.tabs.count - 1);
+        [self selectTabAtIndex:nextIndex];
+        return;
+    }
+
+    // Closing a background tab: keep the visible page, just fix up the index.
+    if (closingIndex < self.activeTabIndex) self.activeTabIndex -= 1;
+    [self.tabTable reloadData];
+    [self.tabTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)self.activeTabIndex]
+               byExtendingSelection:NO];
+    [self updateControls];
 }
 
 - (void)loadFromAddressField:(id)sender {
@@ -904,6 +1045,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return;
     }
 
+    if ([self isSettingsURLString:input]) {
+        [self loadNativeSettingsPageInWebView:self.webView];
+        return;
+    }
+
     NSURL *url = [self URLForUserInput:input];
     if (!url) {
         NSBeep();
@@ -913,12 +1059,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.stringValue = url.absoluteString;
     BrowserTab *tab = [self activeTab];
     tab.urlString = url.absoluteString;
-    self.statusLabel.stringValue = @"Loading";
+    [self setStatusText:@"Loading"];
     [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
 }
 
 - (NSString *)homeURLString {
     return @"trailbrowser://home";
+}
+
+- (NSString *)settingsURLString {
+    return @"trailbrowser://settings";
 }
 
 - (BOOL)isHomeURLString:(NSString *)input {
@@ -928,31 +1078,40 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
            [trimmed isEqualToString:@"about:trailbrowser"];
 }
 
-- (NSString *)nativeHomeHTML {
-    NSURL *homeURL = [[NSBundle mainBundle] URLForResource:@"Home"
-                                             withExtension:@"html"
-                                              subdirectory:@"home"];
+- (BOOL)isSettingsURLString:(NSString *)input {
+    NSString *trimmed = [[input ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return [trimmed isEqualToString:@"trailbrowser://settings"] ||
+           [trimmed isEqualToString:@"trailbrowser://settings/"];
+}
+
+// Load a bundled HTML page (Home, Settings, …) from Resources/home.
+- (NSString *)nativeResourceHTMLNamed:(NSString *)name {
+    NSURL *url = [[NSBundle mainBundle] URLForResource:name withExtension:@"html" subdirectory:@"home"];
     NSError *error = nil;
-    NSString *html = homeURL ? [NSString stringWithContentsOfURL:homeURL
-                                                        encoding:NSUTF8StringEncoding
-                                                           error:&error] : nil;
+    NSString *html = url ? [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:&error] : nil;
     if (html.length > 0) return html;
 
-    NSLog(@"Could not load home page resource: %@", error.localizedDescription);
+    NSLog(@"Could not load %@ resource: %@", name, error.localizedDescription);
     return @"<!doctype html><title>TrailBrowser</title><body><h1>TrailBrowser</h1></body>";
 }
 
-- (NSURL *)nativeHomeBaseURL {
-    NSURL *homeURL = [[NSBundle mainBundle] URLForResource:@"Home"
-                                             withExtension:@"html"
-                                              subdirectory:@"home"];
-    return homeURL.URLByDeletingLastPathComponent ?: [NSURL URLWithString:[self homeURLString]];
+- (NSURL *)nativeResourceBaseURL {
+    NSURL *url = [[NSBundle mainBundle] URLForResource:@"Home" withExtension:@"html" subdirectory:@"home"];
+    return url.URLByDeletingLastPathComponent ?: [NSURL URLWithString:[self homeURLString]];
+}
+
+- (BOOL)isNativeFileURLNamed:(NSString *)fileName url:(NSURL *)url {
+    return url.isFileURL &&
+           [url.lastPathComponent isEqualToString:fileName] &&
+           [url.path containsString:@"/Resources/home/"];
 }
 
 - (BOOL)isNativeHomeFileURL:(NSURL *)url {
-    return url.isFileURL &&
-           [url.lastPathComponent isEqualToString:@"Home.html"] &&
-           [url.path containsString:@"/Resources/home/"];
+    return [self isNativeFileURLNamed:@"Home.html" url:url];
+}
+
+- (BOOL)isNativeSettingsFileURL:(NSURL *)url {
+    return [self isNativeFileURLNamed:@"Settings.html" url:url];
 }
 
 - (NSString *)queryValueNamed:(NSString *)name inURL:(NSURL *)url {
@@ -984,6 +1143,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return YES;
     }
 
+    if ([host isEqualToString:@"settings"]) {
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"sync-cookies"]) {
+        [self importChromeCookies:nil];
+        return YES;
+    }
+
     if ([host isEqualToString:@"home"] || host.length == 0) {
         if (self.webView) [self loadNativeHomePageInWebView:self.webView];
         return YES;
@@ -1001,9 +1170,32 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self reloadSidebarRowForTab:tab];
     }
     self.addressField.stringValue = [self homeURLString];
-    self.statusLabel.stringValue = @"Ready";
-    [webView loadHTMLString:[self nativeHomeHTML]
-                    baseURL:[self nativeHomeBaseURL]];
+    [self setStatusText:@"Ready"];
+    [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Home"]
+                    baseURL:[self nativeResourceBaseURL]];
+}
+
+- (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
+    BrowserTab *tab = [self tabForWebView:webView];
+    if (tab) {
+        tab.title = @"Settings";
+        tab.urlString = [self settingsURLString];
+        tab.favicon = nil;
+        [self reloadSidebarRowForTab:tab];
+    }
+    self.addressField.stringValue = [self settingsURLString];
+    [self setStatusText:@"Ready"];
+    [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Settings"]
+                    baseURL:[self nativeResourceBaseURL]];
+}
+
+- (void)openSettings:(id)sender {
+    (void)sender;
+    if (!self.webView) {
+        [self newTabWithURLString:[self settingsURLString] select:YES];
+        return;
+    }
+    [self loadNativeSettingsPageInWebView:self.webView];
 }
 
 - (NSURL *)URLForUserInput:(NSString *)input {
@@ -1261,11 +1453,19 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)controlTextDidBeginEditing:(NSNotification *)notification {
-    if (notification.object == self.addressField) self.userEditingAddress = YES;
+    if (notification.object == self.addressField) {
+        self.userEditingAddress = YES;
+        self.addressContainer.focused = YES;
+        [self.addressContainer setNeedsDisplay:YES];
+    }
 }
 
 - (void)controlTextDidEndEditing:(NSNotification *)notification {
-    if (notification.object == self.addressField) self.userEditingAddress = NO;
+    if (notification.object == self.addressField) {
+        self.userEditingAddress = NO;
+        self.addressContainer.focused = NO;
+        [self.addressContainer setNeedsDisplay:YES];
+    }
 }
 
 #pragma mark - Page assistant
@@ -1285,19 +1485,32 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)openAssistant:(id)sender {
     (void)sender;
-    self.assistantLauncherButton.hidden = YES;
-    self.assistantBar.hidden = NO;
     [self.webContainer addSubview:self.assistantResultPanel positioned:NSWindowAbove relativeTo:self.webView];
     [self.webContainer addSubview:self.assistantBar positioned:NSWindowAbove relativeTo:self.assistantResultPanel];
+    if (self.assistantBar.hidden) {
+        self.assistantBar.alphaValue = 0.0;
+        self.assistantBar.hidden = NO;
+        [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+            context.duration = 0.18;
+            context.allowsImplicitAnimation = YES;
+            self.assistantBar.animator.alphaValue = 1.0;
+        } completionHandler:nil];
+    }
     [self.window makeFirstResponder:self.assistantPromptField];
 }
 
 - (void)collapseAssistant:(id)sender {
     (void)sender;
-    self.assistantResultPanel.hidden = YES;
-    self.assistantBar.hidden = YES;
-    self.assistantLauncherButton.hidden = NO;
-    [self.webContainer addSubview:self.assistantLauncherButton positioned:NSWindowAbove relativeTo:self.webView];
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.15;
+        self.assistantBar.animator.alphaValue = 0.0;
+        self.assistantResultPanel.animator.alphaValue = 0.0;
+    } completionHandler:^{
+        self.assistantBar.hidden = YES;
+        self.assistantResultPanel.hidden = YES;
+        self.assistantBar.alphaValue = 1.0;
+        self.assistantResultPanel.alphaValue = 1.0;
+    }];
 }
 
 - (NSError *)assistantErrorWithMessage:(NSString *)message {
@@ -1834,7 +2047,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             icon.image = image;
         }
         if (@available(macOS 10.14, *)) {
-            icon.contentTintColor = NSColor.tertiaryLabelColor;
+            icon.contentTintColor = TBFaint();
         }
         [cell addSubview:icon];
         cell.tabIconView = icon;
@@ -1842,7 +2055,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
         NSTextField *title = [NSTextField labelWithString:@""];
         title.translatesAutoresizingMaskIntoConstraints = NO;
-        title.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightSemibold];
+        title.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
         title.lineBreakMode = NSLineBreakByTruncatingTail;
         title.maximumNumberOfLines = 1;
         [cell addSubview:title];
@@ -1857,28 +2070,59 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [cell addSubview:subtitle];
         cell.subtitleLabel = subtitle;
 
+        TBFlatButton *close = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+        close.translatesAutoresizingMaskIntoConstraints = NO;
+        close.cornerRadius = 5.0;
+        close.imagePosition = NSImageOnly;
+        close.imageScaling = NSImageScaleProportionallyDown;
+        close.toolTip = @"Close Tab";
+        close.hidden = YES;
+        close.target = self;
+        close.action = @selector(closeTabFromButton:);
+        if (@available(macOS 11.0, *)) {
+            NSImage *image = [NSImage imageWithSystemSymbolName:@"xmark" accessibilityDescription:@"Close Tab"];
+            NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:10.0
+                                                                                                 weight:NSFontWeightSemibold];
+            image = [image imageWithSymbolConfiguration:config] ?: image;
+            image.template = YES;
+            close.image = image;
+        }
+        if (@available(macOS 10.14, *)) close.contentTintColor = TBMuted();
+        [cell addSubview:close];
+        cell.closeButton = close;
+
         [NSLayoutConstraint activateConstraints:@[
-            [icon.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:16.0],
+            [icon.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:22.0],
             [icon.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
-            [icon.widthAnchor constraintEqualToConstant:18.0],
-            [icon.heightAnchor constraintEqualToConstant:18.0],
+            [icon.widthAnchor constraintEqualToConstant:16.0],
+            [icon.heightAnchor constraintEqualToConstant:16.0],
 
             [title.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:10.0],
-            [title.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-12.0],
-            [title.topAnchor constraintEqualToAnchor:cell.topAnchor constant:7.0],
+            [title.trailingAnchor constraintEqualToAnchor:close.leadingAnchor constant:-6.0],
+            [title.topAnchor constraintEqualToAnchor:cell.topAnchor constant:8.0],
 
             [subtitle.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
             [subtitle.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
-            [subtitle.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:0.0]
+            [subtitle.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:1.0],
+
+            [close.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-10.0],
+            [close.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+            [close.widthAnchor constraintEqualToConstant:20.0],
+            [close.heightAnchor constraintEqualToConstant:20.0]
         ]];
     }
 
     BrowserTab *tab = self.tabs[(NSUInteger)row];
-    BOOL selected = row == tableView.selectedRow;
+    BOOL selected = row == self.activeTabIndex;
+    cell.closeButton.tag = row;
+    cell.closeButton.hidden = !cell.hovering;
+    // A slept (unloaded) background tab reads as dimmed; the active tab is bright.
+    BOOL sleeping = (!selected && tab.webView == nil);
     cell.titleLabel.stringValue = tab.title.length ? tab.title : @"New Tab";
     cell.subtitleLabel.stringValue = [self subtitleForTab:tab];
-    cell.titleLabel.textColor = selected ? NSColor.labelColor : NSColor.secondaryLabelColor;
-    cell.subtitleLabel.textColor = selected ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
+    cell.titleLabel.textColor = selected ? TBText() : TBMuted();
+    cell.subtitleLabel.textColor = TBFaint();
+    cell.tabIconView.alphaValue = sleeping ? 0.55 : 1.0;
 
     if (tab.favicon) {
         tab.favicon.template = NO;
@@ -1891,10 +2135,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             cell.tabIconView.image = image;
         }
         if (@available(macOS 10.14, *)) {
-            cell.tabIconView.contentTintColor = selected ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor;
+            cell.tabIconView.contentTintColor = selected ? TBAccent() : TBFaint();
         }
     }
     return cell;
+}
+
+- (void)closeTabFromButton:(id)sender {
+    NSInteger row = [sender tag];
+    [self closeTabAtIndex:row];
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
@@ -1912,6 +2161,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if ([self isHomeURLString:tab.urlString] || [self isNativeHomeFileURL:webView.URL]) {
         tab.title = @"TrailBrowser Home";
         tab.urlString = [self homeURLString];
+        [self reloadSidebarRowForTab:tab];
+        return;
+    }
+
+    if ([self isSettingsURLString:tab.urlString] || [self isNativeSettingsFileURL:webView.URL]) {
+        tab.title = @"Settings";
+        tab.urlString = [self settingsURLString];
         [self reloadSidebarRowForTab:tab];
         return;
     }
@@ -1998,13 +2254,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)performCookieImportForProfile:(ChromeProfile *)profile {
-    self.statusLabel.stringValue = @"Importing cookies…";
+    [self setStatusText:@"Importing cookies…"];
 
     WKHTTPCookieStore *store = self.webView.configuration.websiteDataStore.httpCookieStore;
     [ChromeCookieImporter importProfileDirectory:profile.directory
                                  intoCookieStore:store
                                       completion:^(ChromeCookieImportResult *result, NSError *error) {
-        self.statusLabel.stringValue = @"Ready";
+        [self setStatusText:@"Ready"];
 
         if (error) {
             [self showImportAlertWithStyle:NSAlertStyleWarning
@@ -2063,7 +2319,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 
     self.progressBar.hidden = !loading;
-    if (!loading) self.progressBar.doubleValue = 0.0;
+    if (!loading) self.progressBar.progress = 0.0;
 }
 
 - (void)syncAddressBarWithWebView {
@@ -2072,6 +2328,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     BrowserTab *tab = [self activeTab];
     if ([self isHomeURLString:tab.urlString]) {
         self.addressField.stringValue = [self homeURLString];
+        return;
+    }
+    if ([self isSettingsURLString:tab.urlString]) {
+        self.addressField.stringValue = [self settingsURLString];
         return;
     }
 
@@ -2095,7 +2355,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (context == BrowserProgressContext) {
         if (observedWebView != self.webView) return;
         double progress = self.webView.estimatedProgress;
-        self.progressBar.doubleValue = progress;
+        self.progressBar.progress = progress;
         self.progressBar.hidden = !self.webView.loading || progress >= 1.0;
         return;
     }
@@ -2117,7 +2377,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
     (void)navigation;
     if (webView != self.webView) return;
-    self.statusLabel.stringValue = @"Loading";
+    [self setStatusText:@"Loading"];
     [self updateControls];
 }
 
@@ -2132,7 +2392,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self updateSidebarTitleForWebView:webView];
     [self fetchFaviconForWebView:webView];
     if (webView == self.webView) {
-        self.statusLabel.stringValue = @"Ready";
+        [self setStatusText:@"Ready"];
         [self syncAddressBarWithWebView];
     }
     [self recordHistoryEntryForWebView:webView];
@@ -2143,7 +2403,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     (void)navigation;
     if (webView != self.webView) return;
-    self.statusLabel.stringValue = error.localizedDescription ?: @"Failed";
+    [self setStatusText:error.localizedDescription ?: @"Failed"];
     [self updateControls];
 }
 
@@ -2180,18 +2440,3 @@ createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
 }
 
 @end
-
-int main(int argc, const char *argv[]) {
-    (void)argc;
-    (void)argv;
-
-    @autoreleasepool {
-        NSApplication *app = [NSApplication sharedApplication];
-        BrowserAppDelegate *delegate = [[BrowserAppDelegate alloc] init];
-        app.delegate = delegate;
-        [app setActivationPolicy:NSApplicationActivationPolicyRegular];
-        [app run];
-    }
-
-    return 0;
-}

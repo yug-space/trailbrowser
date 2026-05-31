@@ -1,14 +1,14 @@
 :root {
   color-scheme: dark;
-  --bg: #081019;
-  --panel: rgba(12, 18, 26, 0.78);
-  --field: rgba(7, 12, 18, 0.9);
-  --text: #f2f8ff;
-  --muted: #8ea3b8;
-  --line: rgba(255, 255, 255, 0.12);
-  --blue: #36a3ff;
-  --green: #32e6b0;
-  --violet: #8467ff;
+  --bg: #0a0a0b;
+  --surface: #161618;
+  --surface-hover: #1f1f23;
+  --text: #f3f3f4;
+  --muted: #8a8a90;
+  --faint: #56565c;
+  --line: rgba(255, 255, 255, 0.09);
+  --accent: #f76b1c;
+  --accent-hover: #ff8330;
 }
 
 * {
@@ -18,7 +18,7 @@
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  height: 100%;
 }
 
 body {
@@ -27,123 +27,186 @@ body {
   place-items: center;
   overflow: hidden;
   color: var(--text);
+  background: var(--bg);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
-  background:
-    radial-gradient(circle at 18% 18%, rgba(54, 163, 255, 0.25), transparent 30%),
-    radial-gradient(circle at 78% 18%, rgba(50, 230, 176, 0.2), transparent 28%),
-    linear-gradient(135deg, #06101a 0%, #0b1118 50%, #10141b 100%);
 }
 
-.home-shell {
-  width: min(900px, calc(100vw - 72px));
-  display: grid;
-  gap: 24px;
-}
-
-.brand {
+.home {
+  width: min(720px, calc(100vw - 64px));
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 30px;
+  /* sit a little above center, like Perplexity */
+  margin-top: -6vh;
+  animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-.brand-orb {
-  width: 54px;
-  height: 54px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, var(--green), var(--blue), var(--violet));
-  box-shadow: 0 24px 72px rgba(54, 163, 255, 0.32);
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-h1 {
+@media (prefers-reduced-motion: reduce) {
+  .home {
+    animation: none;
+  }
+}
+
+.wordmark {
   margin: 0;
-  font-size: 50px;
-  line-height: 1;
-  letter-spacing: 0;
+  font-size: 64px;
+  font-weight: 300;
+  letter-spacing: -2px;
+  color: var(--text);
 }
 
-p {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 15px;
-}
+/* Search card -------------------------------------------------------------- */
 
-.command-bar {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 10px;
-  padding: 12px;
+.search-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 14px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: var(--panel);
-  box-shadow: 0 26px 86px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(18px);
+  background: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-input,
-button {
-  height: 48px;
-  border-radius: 12px;
-  font: inherit;
+.search-card:focus-within {
+  border-color: rgba(247, 107, 28, 0.7);
+  box-shadow: 0 0 0 3px rgba(247, 107, 28, 0.14);
 }
 
-input {
-  min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  outline: none;
-  padding: 0 16px;
-  color: var(--text);
-  background: var(--field);
-  font-size: 16px;
-}
-
-input:focus {
-  border-color: rgba(54, 163, 255, 0.8);
-  box-shadow: 0 0 0 3px rgba(54, 163, 255, 0.18);
-}
-
-button {
+#query {
+  width: 100%;
   border: 0;
-  padding: 0 18px;
-  color: white;
-  font-size: 14px;
-  font-weight: 750;
-  background: rgba(255, 255, 255, 0.08);
-  cursor: pointer;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.5;
+  min-height: 28px;
+  max-height: 240px;
+  padding: 4px 6px 0;
 }
 
-button:hover {
-  filter: brightness(1.1);
+#query::placeholder {
+  color: var(--faint);
 }
 
-.open-button {
-  background: linear-gradient(135deg, var(--blue), var(--violet));
-}
-
-.deep-button {
-  color: #04120f;
-  background: linear-gradient(135deg, var(--green), var(--blue));
-}
-
-.shortcuts {
+.toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
 }
 
-.shortcuts button {
-  height: 38px;
+.spacer {
+  flex: 1;
+}
+
+/* Google ⇄ AI segmented toggle, bottom-right of the search box. */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
 }
 
-@media (max-width: 760px) {
-  .command-bar {
-    grid-template-columns: 1fr;
-  }
+.seg-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
 
-  h1 {
-    font-size: 40px;
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.is-active {
+  background: var(--accent);
+  color: #1a0d04;
+}
+
+.submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #1a0d04;
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.submit svg {
+  width: 18px;
+  height: 18px;
+}
+
+.submit:hover {
+  background: var(--accent-hover);
+}
+
+.submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Quick links -------------------------------------------------------------- */
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.suggestions button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.suggestions button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+@media (max-width: 620px) {
+  .wordmark {
+    font-size: 44px;
   }
 }

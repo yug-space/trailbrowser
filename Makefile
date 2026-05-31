@@ -10,10 +10,22 @@ APP_BUNDLE = $(APP_NAME).app
 APP_BIN = $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 APP_PLIST = $(APP_BUNDLE)/Contents/Info.plist
 APP_RESOURCES_DIR = $(APP_BUNDLE)/Contents/Resources
-APP_SOURCES = mac-browser/Browser.m mac-browser/ChromeCookieImporter.m
-APP_HEADERS = mac-browser/ChromeCookieImporter.h
-APP_HOME_RESOURCES = mac-browser/home/Home.html mac-browser/home/Home.css mac-browser/home/Home.js
-APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security
+APP_SOURCES = mac-browser/main.m \
+              mac-browser/BrowserAppDelegate.m \
+              mac-browser/BrowserTab.m \
+              mac-browser/BrowserTabViews.m \
+              mac-browser/TBControls.m \
+              mac-browser/TBTheme.m \
+              mac-browser/ChromeCookieImporter.m
+APP_HEADERS = mac-browser/BrowserAppDelegate.h \
+              mac-browser/BrowserTab.h \
+              mac-browser/BrowserTabViews.h \
+              mac-browser/TBControls.h \
+              mac-browser/TBTheme.h \
+              mac-browser/ChromeCookieImporter.h
+APP_HOME_RESOURCES = mac-browser/home/Home.html mac-browser/home/Home.css mac-browser/home/Home.js \
+                     mac-browser/home/Settings.html mac-browser/home/Settings.css mac-browser/home/Settings.js
+APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security -framework QuartzCore
 APP_LIBS = -lsqlite3
 
 LINUX_BIN = trailbrowser
