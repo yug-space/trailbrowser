@@ -1740,28 +1740,83 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         spinner, [self htmlEscaped:heading], q, [self htmlEscaped:note]];
 }
 
-- (NSString *)htmlFromCodexOutput:(NSString *)output {
+- (NSString *)contentFragmentFromCodexOutput:(NSString *)output {
     NSString *trimmed = [output stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSRegularExpression *regex =
+
+    NSRegularExpression *fence =
         [NSRegularExpression regularExpressionWithPattern:@"```(?:html)?\\s*(.*?)```"
                                                   options:NSRegularExpressionCaseInsensitive | NSRegularExpressionDotMatchesLineSeparators
                                                     error:nil];
-    NSTextCheckingResult *match = [regex firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+    NSTextCheckingResult *match = [fence firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
     if (match && match.numberOfRanges > 1) {
         trimmed = [[trimmed substringWithRange:[match rangeAtIndex:1]]
                    stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     }
 
-    NSString *lower = trimmed.lowercaseString;
-    if ([lower hasPrefix:@"<!doctype"] || [lower hasPrefix:@"<html"] || [lower hasPrefix:@"<"]) {
-        return trimmed;
+    NSString *(^stripTag)(NSString *, NSString *) = ^NSString *(NSString *html, NSString *tag) {
+        NSString *pattern = [NSString stringWithFormat:@"<%@[^>]*>.*?</%@>", tag, tag];
+        NSRegularExpression *re =
+            [NSRegularExpression regularExpressionWithPattern:pattern
+                                                      options:NSRegularExpressionCaseInsensitive | NSRegularExpressionDotMatchesLineSeparators
+                                                        error:nil];
+        return [re stringByReplacingMatchesInString:html options:0 range:NSMakeRange(0, html.length) withTemplate:@""];
+    };
+    trimmed = stripTag(trimmed, @"script");
+    trimmed = stripTag(trimmed, @"style");
+
+    NSRegularExpression *bodyRe =
+        [NSRegularExpression regularExpressionWithPattern:@"<body[^>]*>(.*?)</body>"
+                                                  options:NSRegularExpressionCaseInsensitive | NSRegularExpressionDotMatchesLineSeparators
+                                                    error:nil];
+    NSTextCheckingResult *bodyMatch = [bodyRe firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+    if (bodyMatch && bodyMatch.numberOfRanges > 1) {
+        trimmed = [trimmed substringWithRange:[bodyMatch rangeAtIndex:1]];
     }
+
+    return [trimmed stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+- (NSString *)articlePageHTMLWithQuery:(NSString *)query contentHTML:(NSString *)contentHTML {
     return [NSString stringWithFormat:
-        @"<!doctype html><html><head><meta charset='utf-8'><style>"
-         "body{background:#0a0a0b;color:#f3f3f4;font-family:-apple-system,sans-serif;"
-         "max-width:720px;margin:0 auto;padding:48px 24px;line-height:1.6}</style></head>"
-         "<body><pre style='white-space:pre-wrap'>%@</pre></body></html>",
-        [self htmlEscaped:trimmed]];
+        @"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+         "<title>%@</title><style>"
+         ":root{color-scheme:dark}"
+         "*{box-sizing:border-box}"
+         "html,body{margin:0}"
+         "body{background:#0a0a0b;color:#f3f3f4;"
+         "font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',sans-serif;"
+         "line-height:1.7;font-size:16px;"
+         "background-image:radial-gradient(900px 500px at 50%% -8%%,rgba(247,107,28,0.10),transparent 70%%)}"
+         ".wrap{max-width:760px;margin:0 auto;padding:64px 28px 96px}"
+         "header.page{border-bottom:1px solid rgba(255,255,255,0.09);padding-bottom:22px;margin-bottom:34px}"
+         ".eyebrow{display:inline-flex;align-items:center;gap:7px;color:#f76b1c;font-size:12px;"
+         "font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin:0 0 12px}"
+         ".eyebrow::before{content:'';width:7px;height:7px;border-radius:50%%;background:#f76b1c}"
+         "h1{font-size:30px;line-height:1.2;font-weight:700;letter-spacing:-0.5px;margin:0}"
+         "article{animation:rise .4s cubic-bezier(.22,.61,.36,1) both}"
+         "@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}"
+         "h2{font-size:21px;font-weight:650;letter-spacing:-0.3px;margin:38px 0 12px}"
+         "h3{font-size:17px;font-weight:650;margin:26px 0 8px}"
+         "p{margin:0 0 16px;color:#e7e7ea}"
+         "a{color:#ff8330;text-decoration:none;border-bottom:1px solid rgba(255,131,48,0.35)}"
+         "a:hover{border-bottom-color:#ff8330}"
+         "ul,ol{margin:0 0 18px;padding-left:22px}li{margin:6px 0;color:#e7e7ea}"
+         "strong{color:#fff}"
+         "blockquote{margin:20px 0;padding:4px 18px;border-left:3px solid #f76b1c;color:#c9c9cf}"
+         "code{background:#1b1b1f;padding:2px 6px;border-radius:5px;font-size:0.92em}"
+         "pre{background:#111113;border:1px solid rgba(255,255,255,0.09);border-radius:10px;"
+         "padding:16px;overflow:auto}pre code{background:none;padding:0}"
+         "table{width:100%%;border-collapse:collapse;margin:18px 0;font-size:14.5px}"
+         "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.09)}"
+         "th{color:#8a8a90;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;font-size:12px}"
+         "hr{border:0;border-top:1px solid rgba(255,255,255,0.09);margin:34px 0}"
+         "img{max-width:100%%;border-radius:10px}"
+         "@media(prefers-reduced-motion:reduce){article{animation:none}}"
+         "</style></head><body><div class='wrap'>"
+         "<header class='page'><p class='eyebrow'>TrailBrowser AI</p><h1>%@</h1></header>"
+         "<article>%@</article></div></body></html>",
+        [self htmlEscaped:query], [self htmlEscaped:query], contentHTML];
 }
 
 - (void)runWebpageSearchForQuery:(NSString *)query {
@@ -1789,13 +1844,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                          baseURL:nil];
 
     NSString *prompt = [NSString stringWithFormat:
-        @"You are TrailBrowser AI. Build a single, complete, self-contained HTML5 web page that answers and explores the user's query.\n"
-         "Rules:\n"
-         "- Output ONLY raw HTML: one full <!doctype html> document. No markdown, no code fences, no commentary before or after.\n"
-         "- Inline all CSS in a <style> tag. Do not reference any external stylesheet, script, font, or image, and do not make network requests.\n"
-         "- Use a clean modern dark theme: background #0a0a0b, text #f3f3f4, muted #8a8a90, a warm orange accent #f76b1c, system-ui font, generous spacing, max readable content width.\n"
-         "- Structure it like a real informative web page: a clear header/title, well-organized sections with headings, lists or tables where useful, and a short summary. Use accurate, concrete information; use live web search when helpful.\n"
-         "- Keep it safe and self-contained: no forms posting anywhere, no tracking.\n\n"
+        @"You are TrailBrowser AI, a research writer. Write a clear, accurate, informative article that answers the user's query.\n"
+         "Output format — IMPORTANT:\n"
+         "- Return ONLY an HTML body fragment: a sequence of semantic elements such as <p>, <h2>, <h3>, <ul>, <ol>, <table>, <blockquote>, and <a href> for links/sources.\n"
+         "- Do NOT include <!doctype>, <html>, <head>, <body>, <style>, <script>, CSS, inline style attributes, or markdown code fences. The page styling is already provided by a template — output content only.\n"
+         "- Do NOT repeat the query as a top-level <h1>; the template already shows the title. Start directly with a short intro <p>.\n"
+         "Content:\n"
+         "- Open with a 1-2 sentence intro paragraph, then organized sections with <h2> headings, using lists or a <table> where they help, and end with a brief summary.\n"
+         "- Use accurate, concrete, up-to-date information; use live web search when helpful and link sources with <a href>.\n\n"
          "User query:\n%@\n",
         trimmed];
 
@@ -1809,8 +1865,18 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                  baseURL:nil];
             return;
         }
+        NSString *fragment = [self contentFragmentFromCodexOutput:output];
+        if (fragment.length == 0) {
+            [self setStatusText:@"Failed"];
+            [self.webView loadHTMLString:[self statusPageHTMLForQuery:trimmed
+                                                                title:@"No page was generated"
+                                                                 note:@"The AI returned no usable content for this query. Try rephrasing it."
+                                                             spinning:NO]
+                                 baseURL:nil];
+            return;
+        }
         [self setStatusText:@"Ready"];
-        [self.webView loadHTMLString:[self htmlFromCodexOutput:output] baseURL:nil];
+        [self.webView loadHTMLString:[self articlePageHTMLWithQuery:trimmed contentHTML:fragment] baseURL:nil];
         BrowserTab *active = [self activeTab];
         if (active) {
             active.title = trimmed;
