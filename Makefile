@@ -27,11 +27,13 @@ APP_HOME_RESOURCES = mac-browser/home/Home.html mac-browser/home/Home.css mac-br
 APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security -framework QuartzCore
 APP_LIBS = -lsqlite3
 
+APP_ICON = assets/TrailBrowser.icns
+
 MCP_DIR = mcp-history-server
 
 all: mac                           # Build the native macOS WebKit browser app
 
-mac: $(APP_BIN) $(APP_PLIST) mac-resources
+mac: $(APP_BIN) $(APP_PLIST) mac-resources mac-icon
 
 $(APP_BIN): $(APP_SOURCES) $(APP_HEADERS)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
@@ -45,6 +47,20 @@ mac-resources: $(APP_HOME_RESOURCES)
 	mkdir -p $(APP_RESOURCES_DIR)/home
 	cp $(APP_HOME_RESOURCES) $(APP_RESOURCES_DIR)/home/
 
+mac-icon: $(APP_ICON)
+	mkdir -p $(APP_RESOURCES_DIR)
+	cp $(APP_ICON) $(APP_RESOURCES_DIR)/TrailBrowser.icns
+
+# Regenerate the .icns from the source SVG (needs rsvg-convert + iconutil).
+icon: assets/trailbrowser-icon.svg
+	rm -rf $(APP_NAME).iconset && mkdir -p $(APP_NAME).iconset
+	for sz in 16 32 128 256 512; do \
+	  rsvg-convert -w $$sz -h $$sz assets/trailbrowser-icon.svg -o $(APP_NAME).iconset/icon_$${sz}x$${sz}.png; \
+	  rsvg-convert -w $$((sz*2)) -h $$((sz*2)) assets/trailbrowser-icon.svg -o $(APP_NAME).iconset/icon_$${sz}x$${sz}@2x.png; \
+	done
+	iconutil -c icns $(APP_NAME).iconset -o $(APP_ICON)
+	rm -rf $(APP_NAME).iconset
+
 run-browser: all                   # Build and open the app
 	open $(APP_BUNDLE)
 
@@ -57,4 +73,4 @@ run-history-mcp:                   # Run read-only history MCP server over stdio
 clean:                             # Remove the built app and MCP dependencies
 	rm -rf $(APP_BUNDLE) $(MCP_DIR)/node_modules
 
-.PHONY: all mac mac-resources run-browser mcp-install run-history-mcp clean
+.PHONY: all mac mac-resources mac-icon icon run-browser mcp-install run-history-mcp clean

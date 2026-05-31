@@ -61,10 +61,19 @@ body {
 
 .wordmark {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
   font-size: 64px;
   font-weight: 300;
   letter-spacing: -2px;
   color: var(--text);
+}
+
+.wordmark .mark {
+  width: 84px;
+  height: 84px;
 }
 
 .search-card {
@@ -203,5 +212,10 @@ body {
 @media (max-width: 620px) {
   .wordmark {
     font-size: 44px;
+  }
+
+  .wordmark .mark {
+    width: 64px;
+    height: 64px;
   }
 }

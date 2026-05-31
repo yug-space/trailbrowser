@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/trailbrowser-logo.svg" alt="TrailBrowser" width="440">
+</p>
+
 # TrailBrowser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f76b1c.svg)](LICENSE)
@@ -15,9 +19,6 @@ The app is the native UI *around* WebKit; it is not a rendering engine. In a
 the resident memory of Google Chrome loading the same sites (~1.7 GB vs ~3.7 GB),
 and substantially less once background tabs sleep. Reproduce with
 [`tools/bench-memory.sh`](tools/bench-memory.sh).
-
-<!-- TODO: add a screenshot, e.g. docs/screenshot.png, and reference it here:
-![TrailBrowser](docs/screenshot.png) -->
 
 ## Requirements
 
