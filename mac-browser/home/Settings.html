@@ -31,6 +31,34 @@
     <section class="card">
       <div class="card-row">
         <div class="card-text">
+          <h2>AI engine (Codex)</h2>
+          <p>Choose the Codex model and how hard it thinks. Higher effort is more
+            thorough but slower; lower effort is faster.</p>
+        </div>
+        <div class="controls">
+          <label>Model
+            <select id="codex-model">
+              <option value="">Default</option>
+              <option value="gpt-5-codex">gpt-5-codex</option>
+              <option value="gpt-5">gpt-5</option>
+              <option value="gpt-5-mini">gpt-5-mini</option>
+            </select>
+          </label>
+          <label>Speed
+            <select id="codex-speed">
+              <option value="minimal">Fastest</option>
+              <option value="low">Fast</option>
+              <option value="medium">Balanced</option>
+              <option value="high">Thorough</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-row">
+        <div class="card-text">
           <h2>Start page</h2>
           <p>Open the TrailBrowser home page with search and quick links.</p>
         </div>

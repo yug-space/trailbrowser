@@ -88,8 +88,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self addMenuItem:@"Forward" action:@selector(goForward:) key:@"]" menu:navMenu];
     [navMenuItem setSubmenu:navMenu];
 
-    // Standard Edit menu so Cmd+C/V/X/A and Undo route to the address field and
-    // web content via the responder chain (these items target the first responder).
     NSMenuItem *editMenuItem = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
     [mainMenu addItem:editMenuItem];
     NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
@@ -699,17 +697,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantBar.hidden = YES;
     [self.webContainer addSubview:self.assistantBar];
 
-    self.assistantModeControl = [[NSSegmentedControl alloc] initWithFrame:NSZeroRect];
+    self.assistantModeControl = [[TBSegmentedControl alloc] initWithFrame:NSZeroRect];
     self.assistantModeControl.translatesAutoresizingMaskIntoConstraints = NO;
-    self.assistantModeControl.segmentCount = 2;
-    [self.assistantModeControl setLabel:@"Ask" forSegment:0];
-    [self.assistantModeControl setLabel:@"Edit" forSegment:1];
-    [self.assistantModeControl setWidth:52.0 forSegment:0];
-    [self.assistantModeControl setWidth:52.0 forSegment:1];
-    self.assistantModeControl.selectedSegment = 0;
+    self.assistantModeControl.titles = @[ @"Ask", @"Edit" ];
+    self.assistantModeControl.selectedIndex = 0;
     self.assistantModeControl.target = self;
     self.assistantModeControl.action = @selector(assistantModeChanged:);
-    self.assistantModeControl.controlSize = NSControlSizeSmall;
     [self.assistantBar addSubview:self.assistantModeControl];
 
     self.assistantPromptField = [[NSTextField alloc] initWithFrame:NSZeroRect];
@@ -1135,9 +1128,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     return url ? [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil] : nil;
 }
 
-// Inline the page's CSS and JS so internal pages render correctly regardless of
-// the base URL, and so we can use a trailbrowser:// base (keeping the address
-// bar clean instead of exposing the bundle's file path).
 - (NSString *)nativeResourceHTMLNamed:(NSString *)name {
     NSString *html = [self resourceStringNamed:name extension:@"html"];
     if (html.length == 0) {
@@ -1203,6 +1193,18 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return YES;
     }
 
+    if ([host isEqualToString:@"set-pref"]) {
+        NSString *key = [self queryValueNamed:@"key" inURL:url];
+        NSString *value = [self queryValueNamed:@"value" inURL:url];
+        NSDictionary<NSString *, NSString *> *allowed = @{ @"codexModel": @"TBCodexModel",
+                                                           @"codexEffort": @"TBCodexEffort" };
+        NSString *defaultsKey = allowed[key];
+        if (defaultsKey) {
+            [[NSUserDefaults standardUserDefaults] setObject:value forKey:defaultsKey];
+        }
+        return YES;
+    }
+
     if ([host isEqualToString:@"home"] || host.length == 0) {
         if (self.webView) [self loadNativeHomePageInWebView:self.webView];
         return YES;
@@ -1235,10 +1237,19 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self reloadSidebarRowForTab:tab];
     }
     self.addressField.stringValue = [self settingsURLString];
-    self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
-    [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Settings"]
-                    baseURL:[NSURL URLWithString:[self settingsURLString]]];
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *model = [defaults stringForKey:@"TBCodexModel"] ?: @"";
+    NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
+    NSString *prefs = [NSString stringWithFormat:
+        @"<script>window.__tbModel=\"%@\";window.__tbEffort=\"%@\";</script></head>",
+        model, effort];
+    NSString *html = [[self nativeResourceHTMLNamed:@"Settings"]
+                      stringByReplacingOccurrencesOfString:@"</head>" withString:prefs];
+
+    self.renderingInternalPage = YES;
+    [webView loadHTMLString:html baseURL:[NSURL URLWithString:[self settingsURLString]]];
 }
 
 - (void)loadNativeOnboardingPageInWebView:(WKWebView *)webView {
@@ -1541,10 +1552,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)assistantModeChanged:(id)sender {
     (void)sender;
-    BOOL editMode = self.assistantModeControl.selectedSegment == 1;
-    self.assistantPromptField.placeholderString = editMode
-        ? @"Change this page"
-        : @"Ask about this page";
+    BOOL editMode = self.assistantModeControl.selectedIndex == 1;
+    NSString *text = editMode ? @"Change this page" : @"Ask about this page";
+    self.assistantPromptField.placeholderAttributedString =
+        [[NSAttributedString alloc] initWithString:text
+                                        attributes:@{ NSForegroundColorAttributeName: TBFaint(),
+                                                      NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular] }];
 }
 
 - (void)closeAssistantResult:(id)sender {
@@ -1732,7 +1745,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return;
     }
 
-    BOOL editMode = self.assistantModeControl.selectedSegment == 1;
+    BOOL editMode = self.assistantModeControl.selectedIndex == 1;
     self.assistantPromptField.stringValue = @"";
     [self setAssistantWorking:YES];
     [self showAssistantMessage:editMode ? @"Codex is preparing a structured page update..."
@@ -1871,12 +1884,23 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSFileHandle *logHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
     NSPipe *inputPipe = [NSPipe pipe];
     NSString *searchFlag = enableSearch ? @"--search " : @"";
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *model = [defaults stringForKey:@"TBCodexModel"];
+    NSString *modelFlag = model.length > 0
+        ? [NSString stringWithFormat:@"-m %@ ", [self shellQuotedString:model]]
+        : @"";
+    NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
+    NSString *effortFlag = effort.length > 0
+        ? [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ", [self shellQuotedString:effort]]
+        : @"";
+
     NSString *command = [NSString stringWithFormat:
                          @"for d in \"$HOME\"/.nvm/versions/node/*/bin /opt/homebrew/bin /usr/local/bin; do "
                           "[ -d \"$d\" ] && PATH=\"$d:$PATH\"; done; export PATH; "
-                          "codex %@exec --skip-git-repo-check --sandbox read-only "
+                          "codex %@exec %@%@--skip-git-repo-check --sandbox read-only "
                           "--ephemeral --color never --output-last-message %@ -",
-                         searchFlag,
+                         searchFlag, modelFlag, effortFlag,
                          [self shellQuotedString:outputPath]];
 
     NSTask *task = [[NSTask alloc] init];
@@ -2584,8 +2608,7 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
                         [host isEqualToString:@"home"] ||
                         [host isEqualToString:@"settings"] ||
                         [host isEqualToString:@"welcome"];
-        // Our own loadHTMLString render of an internal page uses a trailbrowser://
-        // base URL — allow it through instead of re-handling it (which would loop).
+
         if (pageHost && self.renderingInternalPage) {
             self.renderingInternalPage = NO;
             decisionHandler(WKNavigationActionPolicyAllow);

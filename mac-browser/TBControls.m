@@ -209,3 +209,80 @@
 }
 
 @end
+
+@implementation TBSegmentedControl
+
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        self.wantsLayer = YES;
+        self.layer.cornerRadius = 8.0;
+        self.layer.backgroundColor = [NSColor colorWithWhite:1.0 alpha:0.05].CGColor;
+        self.focusRingType = NSFocusRingTypeNone;
+        _titles = @[];
+        _selectedIndex = 0;
+    }
+    return self;
+}
+
+- (void)setTitles:(NSArray<NSString *> *)titles {
+    _titles = [titles copy];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)setSelectedIndex:(NSInteger)selectedIndex {
+    _selectedIndex = selectedIndex;
+    [self setNeedsDisplay:YES];
+}
+
+- (void)setEnabled:(BOOL)enabled {
+    [super setEnabled:enabled];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    NSInteger count = (NSInteger)self.titles.count;
+    if (count == 0) return;
+
+    CGFloat pad = 3.0;
+    CGFloat segWidth = (NSWidth(self.bounds) - 2 * pad) / count;
+    CGFloat segHeight = NSHeight(self.bounds) - 2 * pad;
+
+    for (NSInteger i = 0; i < count; i++) {
+        NSRect seg = NSMakeRect(pad + i * segWidth, pad, segWidth, segHeight);
+        BOOL selected = (i == self.selectedIndex);
+        if (selected) {
+            NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:seg xRadius:6.0 yRadius:6.0];
+            [TBAccent() setFill];
+            [path fill];
+        }
+        NSColor *textColor = selected ? NSColor.whiteColor : (self.isEnabled ? TBMuted() : TBFaint());
+        NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+        paragraph.alignment = NSTextAlignmentCenter;
+        NSDictionary<NSAttributedStringKey, id> *attributes = @{
+            NSFontAttributeName: [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold],
+            NSForegroundColorAttributeName: textColor,
+            NSParagraphStyleAttributeName: paragraph
+        };
+        NSAttributedString *title = [[NSAttributedString alloc] initWithString:self.titles[i] attributes:attributes];
+        NSRect textRect = NSMakeRect(NSMinX(seg), NSMidY(seg) - title.size.height / 2.0, NSWidth(seg), title.size.height);
+        [title drawInRect:textRect];
+    }
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    if (!self.isEnabled) return;
+    NSInteger count = (NSInteger)self.titles.count;
+    if (count == 0) return;
+
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    CGFloat pad = 3.0;
+    CGFloat segWidth = (NSWidth(self.bounds) - 2 * pad) / count;
+    NSInteger index = (NSInteger)((point.x - pad) / segWidth);
+    index = MAX(0, MIN(count - 1, index));
+    self.selectedIndex = index;
+    [NSApp sendAction:self.action to:self.target from:self];
+}
+
+@end
