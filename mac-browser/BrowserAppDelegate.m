@@ -2067,6 +2067,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             : @"";
         NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
         if (effort.length == 0) effort = effortOverride.length > 0 ? effortOverride : @"minimal";
+        if (enableSearch && [effort isEqualToString:@"minimal"]) effort = @"low";
         NSString *effortFlag = [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ",
                                 [self shellQuotedString:effort]];
         command = [pathSetup stringByAppendingFormat:
