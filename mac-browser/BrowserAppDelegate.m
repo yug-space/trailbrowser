@@ -11,11 +11,14 @@
 @interface BrowserAppDelegate ()
 @property (nonatomic, assign) NSInteger tabActivationCounter;
 @property (nonatomic, strong) dispatch_source_t memoryPressureSource;
+@property (nonatomic, strong) NSMutableArray<BrowserTab *> *preloadQueue;
+@property (nonatomic, strong) NSMutableSet<WKWebView *> *preloadingWebViews;
 @end
 
 @implementation BrowserAppDelegate
 
 static const NSInteger kMaxLiveTabs = 24;
+static const NSInteger kMaxConcurrentPreloads = 2;
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -939,6 +942,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     WKWebView *webView = tab.webView;
     if (!webView) return;
 
+    [self.preloadQueue removeObject:tab];
     if (webView.URL.absoluteString.length > 0) tab.urlString = webView.URL.absoluteString;
     if (webView.title.length > 0) tab.title = webView.title;
 
@@ -946,6 +950,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self removeObserversFromWebView:webView];
     [webView removeFromSuperview];
     tab.webView = nil;
+    [self preloadFinishedForWebView:webView];
 }
 
 - (void)startMemoryPressureMonitor {
@@ -1008,8 +1013,27 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)preloadTab:(BrowserTab *)tab {
     if (tab.webView) return;
-    [self ensureWebViewForTab:tab];
-    [self loadContentForTab:tab];
+    if (!self.preloadQueue) self.preloadQueue = [NSMutableArray array];
+    if (!self.preloadingWebViews) self.preloadingWebViews = [NSMutableSet set];
+    if (![self.preloadQueue containsObject:tab]) [self.preloadQueue addObject:tab];
+    [self pumpPreloadQueue];
+}
+
+- (void)pumpPreloadQueue {
+    while ((NSInteger)self.preloadingWebViews.count < kMaxConcurrentPreloads && self.preloadQueue.count > 0) {
+        BrowserTab *tab = self.preloadQueue.firstObject;
+        [self.preloadQueue removeObjectAtIndex:0];
+        if (tab.webView) continue;
+        WKWebView *webView = [self ensureWebViewForTab:tab];
+        [self.preloadingWebViews addObject:webView];
+        [self loadContentForTab:tab];
+    }
+}
+
+- (void)preloadFinishedForWebView:(WKWebView *)webView {
+    if (![self.preloadingWebViews containsObject:webView]) return;
+    [self.preloadingWebViews removeObject:webView];
+    [self pumpPreloadQueue];
 }
 
 - (void)selectTabAtIndex:(NSInteger)index {
@@ -1066,6 +1090,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     BOOL closingActive = (closingIndex == self.activeTabIndex);
     BrowserTab *closingTab = self.tabs[(NSUInteger)closingIndex];
 
+    [self.preloadQueue removeObject:closingTab];
+    if (closingTab.webView) [self.preloadingWebViews removeObject:closingTab.webView];
     [self removeObserversFromWebView:closingTab.webView];
     [closingTab.webView stopLoading];
     [closingTab.webView removeFromSuperview];
@@ -1955,9 +1981,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             ? [NSString stringWithFormat:@"-m %@ ", [self shellQuotedString:model]]
             : @"";
         NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
-        NSString *effortFlag = effort.length > 0
-            ? [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ", [self shellQuotedString:effort]]
-            : @"";
+        if (effort.length == 0) effort = @"low";
+        NSString *effortFlag = [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ",
+                                [self shellQuotedString:effort]];
         command = [pathSetup stringByAppendingFormat:
                    @"codex %@exec %@%@--skip-git-repo-check --sandbox read-only "
                     "--ephemeral --color never --output-last-message %@ -",
@@ -2639,6 +2665,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     (void)navigation;
+    [self preloadFinishedForWebView:webView];
     [self updateSidebarTitleForWebView:webView];
     [self fetchFaviconForWebView:webView];
     if (webView == self.webView) {
@@ -2652,6 +2679,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     (void)navigation;
+    [self preloadFinishedForWebView:webView];
     if (webView != self.webView) return;
     [self setStatusText:error.localizedDescription ?: @"Failed"];
     [self updateControls];
