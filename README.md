@@ -37,8 +37,8 @@ and substantially less once background tabs sleep. Reproduce with
 - A **settings page** (`Cmd+,`) for syncing Chrome cookies, privacy controls,
   site permissions, bookmarks, downloads, history, and AI engine preferences
 - History with automatic topic clusters and optional AI-cluster refresh
-- Bookmarks with an optional bookmarks bar, toolbar access, Settings management,
-  reordering, and HTML import/export
+- Bookmarks with a smart bookmarks bar that appears when bookmarks exist,
+  toolbar access, Settings management, reordering, and HTML import/export
 - Sidebar tabs: a live count, pinned tabs, per-tab status (active accent bar,
   dimmed when slept), drag reordering, hover-to-close, `Cmd+Shift+T` closed-tab
   restore, and right-click actions for duplicate / move / bulk close

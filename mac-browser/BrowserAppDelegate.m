@@ -68,6 +68,8 @@ static NSString * const TBSitePermissionAsk = @"ask";
 static NSString * const TBSitePermissionAllow = @"allow";
 static NSString * const TBSitePermissionDeny = @"deny";
 static NSString * const TBTabDragPasteboardType = @"com.trailbrowser.tab-row";
+static NSString * const TBBookmarkBarVisibleKey = @"TBBookmarkBarVisible";
+static NSString * const TBBookmarkBarUserConfiguredKey = @"TBBookmarkBarUserConfigured";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -330,7 +332,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.recentlyClosedTabs = [NSMutableArray array];
     self.activeTabIndex = -1;
     self.sidebarVisible = YES;
-    self.bookmarkBarVisible = [[NSUserDefaults standardUserDefaults] boolForKey:@"TBBookmarkBarVisible"];
+    self.bookmarkBarVisible = [self initialBookmarkBarVisible];
 
     NSRect frame = NSMakeRect(0, 0, 1200, 760);
     NSWindowStyleMask style = NSWindowStyleMaskTitled |
@@ -2778,7 +2780,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSString *codexModel = [defaults stringForKey:@"TBCodexModel"] ?: @"";
     NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
     NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
-    NSString *bookmarkBar = [defaults boolForKey:@"TBBookmarkBarVisible"] ? @"true" : @"false";
+    NSString *bookmarkBar = self.bookmarkBarVisible ? @"true" : @"false";
     return [NSString stringWithFormat:
         @"<script>window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
          "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";"
@@ -3188,9 +3190,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     id bookmarkBarValue = state[@"bookmarkBarVisible"];
     if ([bookmarkBarValue isKindOfClass:NSNumber.class]) {
         BOOL visible = [bookmarkBarValue boolValue];
+        if (![self bookmarkBarVisibilityUserConfigured] && [self bookmarkEntries].count > 0) {
+            visible = YES;
+        }
         if (visible != self.bookmarkBarVisible) {
             self.bookmarkBarVisible = visible;
-            [[NSUserDefaults standardUserDefaults] setBool:visible forKey:@"TBBookmarkBarVisible"];
+            if ([self bookmarkBarVisibilityUserConfigured]) {
+                [[NSUserDefaults standardUserDefaults] setBool:visible forKey:TBBookmarkBarVisibleKey];
+            }
             self.bookmarkBar.hidden = !visible;
             self.bookmarkBarHeightConstraint.constant = visible ? 34.0 : 0.0;
             [self.window.contentView layoutSubtreeIfNeeded];
@@ -3718,6 +3725,31 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 #pragma mark - Bookmarks
 
+- (BOOL)bookmarkBarVisibilityUserConfigured {
+    return [[NSUserDefaults standardUserDefaults] objectForKey:TBBookmarkBarUserConfiguredKey] != nil;
+}
+
+- (BOOL)initialBookmarkBarVisible {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if ([self bookmarkBarVisibilityUserConfigured]) {
+        return [defaults boolForKey:TBBookmarkBarVisibleKey];
+    }
+    return [defaults boolForKey:TBBookmarkBarVisibleKey] || [self bookmarkEntries].count > 0;
+}
+
+- (void)syncBookmarkBarVisibilityWithBookmarks {
+    if ([self bookmarkBarVisibilityUserConfigured]) return;
+    BOOL shouldShow = [self bookmarkEntries].count > 0;
+    if (shouldShow == self.bookmarkBarVisible) return;
+
+    if (self.bookmarkBarHeightConstraint) {
+        [self setBookmarkBarVisible:shouldShow persist:NO];
+    } else {
+        self.bookmarkBarVisible = shouldShow;
+        self.bookmarkBar.hidden = !shouldShow;
+    }
+}
+
 - (NSArray<NSDictionary<NSString *, id> *> *)bookmarkEntries {
     NSData *data = [NSData dataWithContentsOfFile:[self bookmarksFilePath]];
     if (!data.length) return @[];
@@ -3741,6 +3773,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (!data) return;
     [data writeToFile:[self bookmarksFilePath] options:NSDataWritingAtomic error:nil];
     [self reloadBookmarkBarItems];
+    [self syncBookmarkBarVisibilityWithBookmarks];
 }
 
 - (NSString *)bookmarkURLStringForCurrentPage {
@@ -4699,7 +4732,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)setBookmarkBarVisible:(BOOL)visible persist:(BOOL)persist {
     self.bookmarkBarVisible = visible;
     if (persist) {
-        [[NSUserDefaults standardUserDefaults] setBool:visible forKey:@"TBBookmarkBarVisible"];
+        [[NSUserDefaults standardUserDefaults] setBool:visible forKey:TBBookmarkBarVisibleKey];
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:TBBookmarkBarUserConfiguredKey];
     }
     self.bookmarkBar.hidden = !visible;
     self.bookmarkBarHeightConstraint.constant = visible ? 34.0 : 0.0;
