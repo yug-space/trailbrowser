@@ -1,5 +1,6 @@
 const syncButton = document.getElementById("sync-cookies");
 const homeButton = document.getElementById("open-home");
+const bookmarkBarToggle = document.getElementById("bookmark-bar-toggle");
 const engineSelect = document.getElementById("ai-engine");
 const modelSelect = document.getElementById("ai-model");
 const speedSelect = document.getElementById("codex-speed");
@@ -119,6 +120,11 @@ syncButton.addEventListener("click", () => {
 
 homeButton.addEventListener("click", () => {
   window.location.href = "trailbrowser://home";
+});
+
+bookmarkBarToggle.checked = Boolean(window.__tbBookmarkBarVisible);
+bookmarkBarToggle.addEventListener("change", () => {
+  setPref("bookmarkBar", bookmarkBarToggle.checked ? "1" : "0");
 });
 
 const historyEntries = Array.isArray(window.__tbHistory) ? window.__tbHistory : [];

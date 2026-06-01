@@ -37,7 +37,8 @@ and substantially less once background tabs sleep. Reproduce with
 - A **settings page** (`Cmd+,`) for syncing Chrome cookies, privacy controls,
   site permissions, bookmarks, downloads, history, and AI engine preferences
 - History with automatic topic clusters and optional AI-cluster refresh
-- Bookmarks with toolbar access, Settings management, and HTML import/export
+- Bookmarks with an optional bookmarks bar, toolbar access, Settings management,
+  and HTML import/export
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
   slept), and hover-to-close
 - **Efficient memory & process use:** WebKit shares content processes across
@@ -47,7 +48,7 @@ and substantially less once background tabs sleep. Reproduce with
 - A built-in **page assistant** (Ask / Edit) powered by the `codex` or `claude` CLI
 - A 2px accent loading bar and a status dot
 - Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+Shift+N`, `Cmd+W`,
-  `Cmd+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`, `Cmd+[`, `Cmd+]`
+  `Cmd+B`, `Cmd+Shift+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`, `Cmd+[`, `Cmd+]`
 - A read-only **history MCP server** for querying your browsing history
 
 ## Repository layout

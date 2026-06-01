@@ -244,6 +244,31 @@ button.danger:hover {
   border-color: var(--accent);
 }
 
+.switch-row {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.switch-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.switch-row:hover {
+  background: var(--surface-hover);
+}
+
 .history-card {
   display: flex;
   flex-direction: column;

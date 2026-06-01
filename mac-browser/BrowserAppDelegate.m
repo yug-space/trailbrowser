@@ -26,6 +26,10 @@
 @property (nonatomic, strong) NSButton *bookmarkButton;
 @property (nonatomic, strong) NSButton *bookmarksButton;
 @property (nonatomic, strong) NSPopover *bookmarksPopover;
+@property (nonatomic, strong) NSView *bookmarkBar;
+@property (nonatomic, strong) NSStackView *bookmarkBarStack;
+@property (nonatomic, strong) NSLayoutConstraint *bookmarkBarHeightConstraint;
+@property (nonatomic, assign) BOOL bookmarkBarVisible;
 @property (nonatomic, strong) NSButton *downloadsButton;
 @property (nonatomic, strong) NSPopover *downloadsPopover;
 @property (nonatomic, strong) NSVisualEffectView *findBar;
@@ -190,6 +194,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)
                  menu:viewMenu];
     [viewMenu addItem:[NSMenuItem separatorItem]];
+    [self addMenuItem:@"Show Bookmarks Bar"
+               action:@selector(toggleBookmarkBar:)
+                  key:@"b"
+            modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagShift)
+                 menu:viewMenu];
+    [viewMenu addItem:[NSMenuItem separatorItem]];
     [self addMenuItem:@"Actual Size" action:@selector(resetPageZoom:) key:@"0" menu:viewMenu];
     [self addMenuItem:@"Zoom In" action:@selector(zoomIn:) key:@"=" menu:viewMenu];
     [self addMenuItem:@"Zoom Out" action:@selector(zoomOut:) key:@"-" menu:viewMenu];
@@ -241,10 +251,19 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [menu addItem:item];
 }
 
+- (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
+    if (menuItem.action == @selector(toggleBookmarkBar:)) {
+        menuItem.state = self.bookmarkBarVisible ? NSControlStateValueOn : NSControlStateValueOff;
+        menuItem.title = self.bookmarkBarVisible ? @"Hide Bookmarks Bar" : @"Show Bookmarks Bar";
+    }
+    return YES;
+}
+
 - (void)buildWindow {
     self.tabs = [NSMutableArray array];
     self.activeTabIndex = -1;
     self.sidebarVisible = YES;
+    self.bookmarkBarVisible = [[NSUserDefaults standardUserDefaults] boolForKey:@"TBBookmarkBarVisible"];
 
     NSRect frame = NSMakeRect(0, 0, 1200, 760);
     NSWindowStyleMask style = NSWindowStyleMaskTitled |
@@ -398,6 +417,25 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.progressBar.hidden = YES;
     [toolbar addSubview:self.progressBar];
 
+    self.bookmarkBar = [[NSView alloc] initWithFrame:NSZeroRect];
+    self.bookmarkBar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.bookmarkBar.wantsLayer = YES;
+    self.bookmarkBar.layer.backgroundColor = TBSurface().CGColor;
+    self.bookmarkBar.layer.masksToBounds = YES;
+    self.bookmarkBar.hidden = !self.bookmarkBarVisible;
+    [root addSubview:self.bookmarkBar];
+
+    NSView *bookmarkBarHairline = [self hairlineView];
+    [self.bookmarkBar addSubview:bookmarkBarHairline];
+
+    self.bookmarkBarStack = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    self.bookmarkBarStack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.bookmarkBarStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    self.bookmarkBarStack.alignment = NSLayoutAttributeCenterY;
+    self.bookmarkBarStack.distribution = NSStackViewDistributionFill;
+    self.bookmarkBarStack.spacing = 6.0;
+    [self.bookmarkBar addSubview:self.bookmarkBarStack];
+
     NSView *contentArea = [[NSView alloc] initWithFrame:NSZeroRect];
     contentArea.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:contentArea];
@@ -491,6 +529,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 
     self.sidebarWidthConstraint = [self.sidebar.widthAnchor constraintEqualToConstant:240.0];
+    self.bookmarkBarHeightConstraint = [self.bookmarkBar.heightAnchor constraintEqualToConstant:self.bookmarkBarVisible ? 34.0 : 0.0];
 
     NSLayoutConstraint *addressCenter = [self.addressContainer.centerXAnchor constraintEqualToAnchor:toolbar.centerXAnchor];
     addressCenter.priority = NSLayoutPriorityDefaultHigh - 1;
@@ -571,7 +610,22 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.progressBar.bottomAnchor constraintEqualToAnchor:toolbar.bottomAnchor],
         [self.progressBar.heightAnchor constraintEqualToConstant:2.0],
 
-        [contentArea.topAnchor constraintEqualToAnchor:toolbar.bottomAnchor],
+        [self.bookmarkBar.topAnchor constraintEqualToAnchor:toolbar.bottomAnchor],
+        [self.bookmarkBar.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+        [self.bookmarkBar.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+        self.bookmarkBarHeightConstraint,
+
+        [bookmarkBarHairline.leadingAnchor constraintEqualToAnchor:self.bookmarkBar.leadingAnchor],
+        [bookmarkBarHairline.trailingAnchor constraintEqualToAnchor:self.bookmarkBar.trailingAnchor],
+        [bookmarkBarHairline.bottomAnchor constraintEqualToAnchor:self.bookmarkBar.bottomAnchor],
+        [bookmarkBarHairline.heightAnchor constraintEqualToConstant:1.0],
+
+        [self.bookmarkBarStack.leadingAnchor constraintEqualToAnchor:self.bookmarkBar.leadingAnchor constant:88.0],
+        [self.bookmarkBarStack.trailingAnchor constraintLessThanOrEqualToAnchor:self.bookmarkBar.trailingAnchor constant:-14.0],
+        [self.bookmarkBarStack.centerYAnchor constraintEqualToAnchor:self.bookmarkBar.centerYAnchor],
+        [self.bookmarkBarStack.heightAnchor constraintEqualToConstant:26.0],
+
+        [contentArea.topAnchor constraintEqualToAnchor:self.bookmarkBar.bottomAnchor],
         [contentArea.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
         [contentArea.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
         [contentArea.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
@@ -624,6 +678,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     ]];
 
     [self updateTabCount];
+    [self reloadBookmarkBarItems];
     [self updateControls];
     self.window.delegate = self;
     self.window.initialFirstResponder = self.addressField;
@@ -2370,6 +2425,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if ([host isEqualToString:@"set-pref"]) {
         NSString *key = [self queryValueNamed:@"key" inURL:url];
         NSString *value = [self queryValueNamed:@"value" inURL:url];
+        if ([key isEqualToString:@"bookmarkBar"]) {
+            NSString *normalized = value.lowercaseString ?: @"";
+            BOOL visible = [normalized isEqualToString:@"1"] ||
+                           [normalized isEqualToString:@"true"] ||
+                           [normalized isEqualToString:@"yes"];
+            [self setBookmarkBarVisible:visible persist:YES];
+            return YES;
+        }
         NSDictionary<NSString *, NSString *> *allowed = @{ @"aiEngine": @"TBAIEngine",
                                                            @"codexModel": @"TBCodexModel",
                                                            @"claudeModel": @"TBClaudeModel",
@@ -2412,10 +2475,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSString *codexModel = [defaults stringForKey:@"TBCodexModel"] ?: @"";
     NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
     NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
+    NSString *bookmarkBar = [defaults boolForKey:@"TBBookmarkBarVisible"] ? @"true" : @"false";
     return [NSString stringWithFormat:
         @"<script>window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
-         "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";</script></head>",
-        engine, codexModel, claudeModel, effort];
+         "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";"
+         "window.__tbBookmarkBarVisible=%@;</script></head>",
+        engine, codexModel, claudeModel, effort, bookmarkBar];
 }
 
 - (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
@@ -2784,6 +2849,18 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             [self.window.contentView layoutSubtreeIfNeeded];
         }
     }
+
+    id bookmarkBarValue = state[@"bookmarkBarVisible"];
+    if ([bookmarkBarValue isKindOfClass:NSNumber.class]) {
+        BOOL visible = [bookmarkBarValue boolValue];
+        if (visible != self.bookmarkBarVisible) {
+            self.bookmarkBarVisible = visible;
+            [[NSUserDefaults standardUserDefaults] setBool:visible forKey:@"TBBookmarkBarVisible"];
+            self.bookmarkBar.hidden = !visible;
+            self.bookmarkBarHeightConstraint.constant = visible ? 34.0 : 0.0;
+            [self.window.contentView layoutSubtreeIfNeeded];
+        }
+    }
 }
 
 - (BOOL)restorePreviousSessionIfAvailable {
@@ -2831,6 +2908,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         @"tabs": [self stateTabEntries],
         @"activeTabIndex": @([self stateActiveTabIndex]),
         @"sidebarVisible": @(self.sidebarVisible),
+        @"bookmarkBarVisible": @(self.bookmarkBarVisible),
         @"windowFrame": self.window ? NSStringFromRect(self.window.frame) : @"",
         @"cookiesExposed": @NO
     };
@@ -3318,6 +3396,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                                      error:nil];
     if (!data) return;
     [data writeToFile:[self bookmarksFilePath] options:NSDataWritingAtomic error:nil];
+    [self reloadBookmarkBarItems];
 }
 
 - (NSString *)bookmarkURLStringForCurrentPage {
@@ -3659,6 +3738,106 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSArray<NSDictionary<NSString *, id> *> *entries = [self settingsBookmarkEntries];
     if (entries.count <= limit) return entries;
     return [entries subarrayWithRange:NSMakeRange(0, limit)];
+}
+
+- (NSString *)shortBookmarkTitleForEntry:(NSDictionary<NSString *, id> *)entry {
+    NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+    if (title.length == 0) title = [entry[@"host"] isKindOfClass:NSString.class] ? entry[@"host"] : @"";
+    if (title.length == 0) {
+        NSString *urlString = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        title = urlString.length ? urlString : @"Bookmark";
+    }
+    if (title.length > 28) title = [[title substringToIndex:27] stringByAppendingString:@"…"];
+    return title;
+}
+
+- (NSButton *)bookmarkBarButtonForEntry:(NSDictionary<NSString *, id> *)entry {
+    NSString *urlString = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+    NSString *title = [self shortBookmarkTitleForEntry:entry];
+
+    TBFlatButton *button = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.cornerRadius = 7.0;
+    button.target = self;
+    button.action = @selector(openBookmarkFromBar:);
+    button.identifier = urlString;
+    button.toolTip = urlString.length ? urlString : title;
+    button.imagePosition = NSImageLeft;
+    button.imageScaling = NSImageScaleProportionallyDown;
+    button.imageHugsTitle = YES;
+    button.alignment = NSTextAlignmentLeft;
+    if (@available(macOS 11.0, *)) {
+        NSImage *image = [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:title];
+        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:11.0
+                                                                                             weight:NSFontWeightRegular];
+        image = [image imageWithSymbolConfiguration:config] ?: image;
+        image.template = YES;
+        button.image = image;
+    }
+    if (@available(macOS 10.14, *)) button.contentTintColor = TBFaint();
+
+    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+    paragraph.lineBreakMode = NSLineBreakByTruncatingTail;
+    paragraph.alignment = NSTextAlignmentLeft;
+    button.attributedTitle = [[NSAttributedString alloc] initWithString:[@"  " stringByAppendingString:title]
+                                                             attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular],
+        NSForegroundColorAttributeName: TBText(),
+        NSParagraphStyleAttributeName: paragraph
+    }];
+    [button.heightAnchor constraintEqualToConstant:26.0].active = YES;
+    [button.widthAnchor constraintGreaterThanOrEqualToConstant:74.0].active = YES;
+    [button.widthAnchor constraintLessThanOrEqualToConstant:180.0].active = YES;
+    return button;
+}
+
+- (NSButton *)bookmarkBarMoreButtonWithHiddenCount:(NSUInteger)hiddenCount {
+    NSString *title = hiddenCount > 0
+        ? [NSString stringWithFormat:@"%lu more", (unsigned long)hiddenCount]
+        : @"Bookmarks";
+    TBFlatButton *button = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.cornerRadius = 7.0;
+    button.target = self;
+    button.action = @selector(showBookmarksPopover:);
+    button.toolTip = @"More bookmarks";
+    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+    paragraph.alignment = NSTextAlignmentCenter;
+    button.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular],
+        NSForegroundColorAttributeName: TBMuted(),
+        NSParagraphStyleAttributeName: paragraph
+    }];
+    [button.heightAnchor constraintEqualToConstant:26.0].active = YES;
+    [button.widthAnchor constraintEqualToConstant:hiddenCount > 0 ? 78.0 : 92.0].active = YES;
+    return button;
+}
+
+- (void)reloadBookmarkBarItems {
+    if (!self.bookmarkBarStack) return;
+    NSArray<NSView *> *existing = self.bookmarkBarStack.arrangedSubviews.copy;
+    for (NSView *view in existing) {
+        [self.bookmarkBarStack removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+
+    NSArray<NSDictionary<NSString *, id> *> *bookmarks = [self settingsBookmarkEntries];
+    if (bookmarks.count == 0) {
+        NSTextField *empty = [self popoverLabelWithString:@"No bookmarks yet"
+                                                     font:[NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular]
+                                                    color:TBFaint()];
+        [self.bookmarkBarStack addArrangedSubview:empty];
+        [empty.heightAnchor constraintEqualToConstant:24.0].active = YES;
+        return;
+    }
+
+    NSUInteger visibleCount = MIN(bookmarks.count, 10);
+    for (NSUInteger i = 0; i < visibleCount; i++) {
+        [self.bookmarkBarStack addArrangedSubview:[self bookmarkBarButtonForEntry:bookmarks[i]]];
+    }
+    if (bookmarks.count > visibleCount) {
+        [self.bookmarkBarStack addArrangedSubview:[self bookmarkBarMoreButtonWithHiddenCount:(bookmarks.count - visibleCount)]];
+    }
 }
 
 - (NSString *)downloadIDForMetadata:(NSMutableDictionary<NSString *, id> *)metadata {
@@ -4104,9 +4283,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     controller.view = [self bookmarksPopoverContentView];
     popover.contentViewController = controller;
     self.bookmarksPopover = popover;
-    [popover showRelativeToRect:self.bookmarksButton.bounds
-                         ofView:self.bookmarksButton
+    NSView *anchor = [sender isKindOfClass:NSView.class] ? sender : self.bookmarksButton;
+    [popover showRelativeToRect:anchor.bounds
+                         ofView:anchor
                   preferredEdge:NSMinYEdge];
+}
+
+- (void)openBookmarkFromBar:(id)sender {
+    NSString *urlString = [sender respondsToSelector:@selector(identifier)] ? [sender identifier] : @"";
+    if (urlString.length == 0) return;
+    [self loadURLString:urlString];
 }
 
 - (void)openBookmarkFromPopover:(id)sender {
@@ -4127,6 +4313,30 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     (void)sender;
     [self.bookmarksPopover close];
     [self openSettings:nil];
+}
+
+- (void)setBookmarkBarVisible:(BOOL)visible persist:(BOOL)persist {
+    self.bookmarkBarVisible = visible;
+    if (persist) {
+        [[NSUserDefaults standardUserDefaults] setBool:visible forKey:@"TBBookmarkBarVisible"];
+    }
+    self.bookmarkBar.hidden = !visible;
+    self.bookmarkBarHeightConstraint.constant = visible ? 34.0 : 0.0;
+    [self reloadBookmarkBarItems];
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.18;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        [self.window.contentView layoutSubtreeIfNeeded];
+    } completionHandler:^{
+        self.bookmarkBar.hidden = !self.bookmarkBarVisible;
+        [self setStatusText:self.bookmarkBarVisible ? @"Bookmarks bar shown" : @"Bookmarks bar hidden"];
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
+    }];
+}
+
+- (void)toggleBookmarkBar:(id)sender {
+    (void)sender;
+    [self setBookmarkBarVisible:!self.bookmarkBarVisible persist:YES];
 }
 
 - (void)updateDownloadsButton {
