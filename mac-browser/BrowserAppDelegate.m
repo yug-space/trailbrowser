@@ -34,6 +34,8 @@
 @property (nonatomic, strong) NSButton *downloadsButton;
 @property (nonatomic, strong) NSPopover *downloadsPopover;
 @property (nonatomic, strong) NSMenu *tabContextMenu;
+@property (nonatomic, strong) TBPillButton *autofillButton;
+@property (nonatomic, strong) NSLayoutConstraint *autofillButtonWidthConstraint;
 @property (nonatomic, strong) NSVisualEffectView *findBar;
 @property (nonatomic, strong) NSTextField *findField;
 @property (nonatomic, strong) NSTextField *findStatusLabel;
@@ -46,6 +48,8 @@
 @property (nonatomic, strong) NSLayoutConstraint *tabSwitcherWidthConstraint;
 @property (nonatomic, assign) BOOL tabSwitcherVisible;
 @property (nonatomic, assign) NSInteger tabSwitcherIndex;
+@property (nonatomic, assign) BOOL pageHasFillableForms;
+@property (nonatomic, assign) BOOL formAutofillInProgress;
 @property (nonatomic, assign) BOOL restoringSession;
 @property (nonatomic, assign) BOOL suppressTabSelectionChange;
 @property (nonatomic, strong) NSView *rootView;
@@ -458,6 +462,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.askButton.action = @selector(openAssistant:);
     [toolbar addSubview:self.askButton];
 
+    self.autofillButton = [[TBPillButton alloc] initWithFrame:NSZeroRect];
+    self.autofillButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.autofillButton.pillStyle = TBPillStyleSecondary;
+    self.autofillButton.title = @"Fill AI";
+    self.autofillButton.toolTip = @"Autofill this form with AI";
+    self.autofillButton.target = self;
+    self.autofillButton.action = @selector(autofillFormsWithAI:);
+    self.autofillButton.hidden = YES;
+    [toolbar addSubview:self.autofillButton];
+
     self.settingsButton = [self toolbarButtonWithSymbol:@"gearshape"
                                                fallback:@"S"
                                                 tooltip:@"Settings"
@@ -597,13 +611,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton,
                            self.addressContainer, self.reloadButton,
-                           self.askButton, self.bookmarkButton, self.bookmarksButton, self.downloadsButton,
+                           self.autofillButton, self.askButton, self.bookmarkButton, self.bookmarksButton, self.downloadsButton,
                            self.settingsButton, self.progressBar ]) {
         [toolbar addSubview:view];
     }
 
     self.sidebarWidthConstraint = [self.sidebar.widthAnchor constraintEqualToConstant:240.0];
     self.bookmarkBarHeightConstraint = [self.bookmarkBar.heightAnchor constraintEqualToConstant:self.bookmarkBarVisible ? 34.0 : 0.0];
+    self.autofillButtonWidthConstraint = [self.autofillButton.widthAnchor constraintEqualToConstant:0.0];
 
     NSLayoutConstraint *addressCenter = [self.addressContainer.centerXAnchor constraintEqualToAnchor:toolbar.centerXAnchor];
     addressCenter.priority = NSLayoutPriorityDefaultHigh - 1;
@@ -668,7 +683,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.askButton.widthAnchor constraintEqualToConstant:68.0],
         [self.askButton.heightAnchor constraintEqualToConstant:28.0],
 
-        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-10.0],
+        [self.autofillButton.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-8.0],
+        [self.autofillButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+        self.autofillButtonWidthConstraint,
+        [self.autofillButton.heightAnchor constraintEqualToConstant:28.0],
+
+        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.autofillButton.leadingAnchor constant:-10.0],
         [self.reloadButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
         [self.progressBar.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor],
@@ -865,7 +885,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressSuggestionsPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.96].CGColor;
     self.tabSwitcherPanel.appearance = [self themeVibrantAppearance];
     self.tabSwitcherPanel.layer.borderColor = TBBorder().CGColor;
-    self.tabSwitcherPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.72].CGColor;
+    self.tabSwitcherPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.92].CGColor;
 
     self.addressField.textColor = TBText();
     self.addressField.placeholderAttributedString = [self placeholderWithString:@"Search or enter website name" size:13.5];
@@ -2377,6 +2397,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self setStatusText:self.webView.loading ? @"Loading" : @"Ready"];
     self.progressBar.progress = self.webView.estimatedProgress;
     self.progressBar.hidden = !self.webView.loading || self.webView.estimatedProgress >= 1.0;
+    [self scheduleFormDetectionForWebView:self.webView];
     if (!self.restoringSession) [self writeBrowserStateRunning:YES];
 }
 
@@ -5650,6 +5671,315 @@ doCommandBySelector:(SEL)commandSelector {
     self.assistantResultTextView.string = message ?: @"";
 }
 
+#pragma mark - AI form autofill
+
+- (void)updateAutofillButton {
+    BOOL show = self.pageHasFillableForms && self.webView && [self isHTTPURL:self.webView.URL];
+    self.autofillButton.hidden = !show;
+    self.autofillButtonWidthConstraint.constant = show ? 72.0 : 0.0;
+    self.autofillButton.enabled = show && !self.formAutofillInProgress;
+    self.autofillButton.title = self.formAutofillInProgress ? @"Filling" : @"Fill AI";
+    self.autofillButton.toolTip = show
+        ? @"Autofill this form with AI"
+        : @"AI autofill appears on pages with forms";
+}
+
+- (NSString *)fillableFormDetectionScript {
+    return
+        @"(() => {"
+         "const blocked = /^(hidden|password|file|submit|button|reset|image)$/i;"
+         "const visible = (el) => {"
+         "const r = el.getBoundingClientRect();"
+         "const s = getComputedStyle(el);"
+         "return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && !el.disabled && !el.readOnly;"
+         "};"
+         "return Array.from(document.querySelectorAll('input,textarea,select')).some((el) => {"
+         "const type = (el.getAttribute('type') || el.tagName || '').toLowerCase();"
+         "return !blocked.test(type) && visible(el);"
+         "});"
+         "})()";
+}
+
+- (void)detectFillableFormsForWebView:(WKWebView *)webView {
+    if (!webView || webView != self.webView || ![self isHTTPURL:webView.URL]) {
+        self.pageHasFillableForms = NO;
+        [self updateAutofillButton];
+        return;
+    }
+
+    [webView evaluateJavaScript:[self fillableFormDetectionScript]
+              completionHandler:^(id result, NSError *error) {
+        if (webView != self.webView) return;
+        BOOL hasForms = !error && [result respondsToSelector:@selector(boolValue)] && [result boolValue];
+        self.pageHasFillableForms = hasForms;
+        [self updateAutofillButton];
+    }];
+}
+
+- (void)scheduleFormDetectionForWebView:(WKWebView *)webView {
+    if (!webView || webView != self.webView) return;
+    [self detectFillableFormsForWebView:webView];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self detectFillableFormsForWebView:webView];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self detectFillableFormsForWebView:webView];
+    });
+}
+
+- (nullable NSString *)promptForAutofillInstructions {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleInformational;
+    alert.messageText = @"Autofill this form with AI";
+    alert.informativeText =
+        @"TrailBrowser will send form labels, placeholders, page context, and your instructions "
+         "to the selected AI CLI. Existing field values, cookies, passwords, payment fields, "
+         "and hidden fields are not sent.";
+    [alert addButtonWithTitle:@"Autofill"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 420, 28)];
+    field.placeholderString = @"What should AI use for this form?";
+    field.stringValue = @"";
+    alert.accessoryView = field;
+
+    NSModalResponse response = [alert runModal];
+    if (response != NSAlertFirstButtonReturn) return nil;
+    return [field.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
+}
+
+- (void)setAutofillWorking:(BOOL)working {
+    self.formAutofillInProgress = working;
+    [self updateAutofillButton];
+    [self setStatusText:working ? @"Autofilling form with AI" : @"Ready"];
+}
+
+- (void)formSnapshotWithCompletion:(void (^)(NSString *snapshot, NSError *error))completion {
+    NSString *script =
+        @"(() => {"
+         "const clip = (value, limit) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);"
+         "const blocked = /^(hidden|password|file|submit|button|reset|image)$/i;"
+         "const sensitive = /(password|passcode|otp|one.?time|2fa|mfa|credit|card|cvv|cvc|ssn|social security|bank|routing|account|passport|secret|token|api.?key|private.?key)/i;"
+         "const visible = (el) => {"
+         "const r = el.getBoundingClientRect();"
+         "const s = getComputedStyle(el);"
+         "return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && !el.disabled && !el.readOnly;"
+         "};"
+         "const labels = Array.from(document.querySelectorAll('label'));"
+         "const labelFor = (el) => {"
+         "const pieces = [];"
+         "if (el.id) { const exact = labels.find((label) => label.htmlFor === el.id); if (exact) pieces.push(exact.innerText); }"
+         "const parentLabel = el.closest('label'); if (parentLabel) pieces.push(parentLabel.innerText);"
+         "const describedBy = (el.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean)"
+         ".map((id) => document.getElementById(id)?.innerText).filter(Boolean).join(' ');"
+         "if (describedBy) pieces.push(describedBy);"
+         "return clip(pieces.filter(Boolean).join(' '), 180);"
+         "};"
+         "const contextFor = (el) => {"
+         "const form = el.closest('form,fieldset,section,article,main') || el.parentElement;"
+         "if (!form) return '';"
+         "const clone = form.cloneNode(true);"
+         "clone.querySelectorAll('script,style,noscript,iframe,svg,img,input,textarea,select,button').forEach((node) => node.remove());"
+         "return clip(clone.innerText, 600);"
+         "};"
+         "let seq = window.__trailbrowserAutofillSeq || 1;"
+         "const fields = [];"
+         "for (const el of Array.from(document.querySelectorAll('input,textarea,select'))) {"
+         "const tag = el.tagName.toLowerCase();"
+         "const type = tag === 'input' ? (el.getAttribute('type') || 'text').toLowerCase() : tag;"
+         "const label = labelFor(el);"
+         "const identity = [label, el.name, el.id, el.placeholder, el.autocomplete, type].join(' ');"
+         "if (blocked.test(type) || sensitive.test(identity) || !visible(el)) continue;"
+         "if (!el.dataset.trailbrowserAutofillId) el.dataset.trailbrowserAutofillId = String(seq++);"
+         "const options = tag === 'select'"
+         "? Array.from(el.options).slice(0, 80).map((option) => ({ value: option.value, text: clip(option.textContent, 120) }))"
+         ": [];"
+         "fields.push({"
+         "id: el.dataset.trailbrowserAutofillId,"
+         "tag, type,"
+         "label,"
+         "name: clip(el.name, 120),"
+         "domId: clip(el.id, 120),"
+         "placeholder: clip(el.placeholder, 160),"
+         "autocomplete: clip(el.autocomplete, 80),"
+         "required: !!el.required,"
+         "maxLength: Number(el.maxLength || 0),"
+         "options,"
+         "nearbyText: contextFor(el)"
+         "});"
+         "}"
+         "window.__trailbrowserAutofillSeq = seq;"
+         "return JSON.stringify({"
+         "url: location.href,"
+         "title: document.title,"
+         "headings: clip(Array.from(document.querySelectorAll('h1,h2,h3')).map((node) => node.innerText).filter(Boolean).join('\\n'), 1800),"
+         "fields"
+         "});"
+         "})()";
+
+    [self.webView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        if (![result isKindOfClass:NSString.class]) {
+            completion(nil, [self assistantErrorWithMessage:@"Could not inspect this form."]);
+            return;
+        }
+        completion(result, nil);
+    }];
+}
+
+- (NSString *)autofillPromptForInstructions:(NSString *)instructions snapshot:(NSString *)snapshot {
+    return [NSString stringWithFormat:
+            @"You are TrailBrowser's AI form autofill assistant.\n"
+             "Return strict JSON only. No markdown, no explanation.\n"
+             "Schema: {\"fields\":[{\"id\":string,\"value\":string|boolean}],\"summary\":string|null}.\n"
+             "Use only the supplied form metadata, page context, and user instructions.\n"
+             "Do not submit the form, navigate, fetch URLs, or request cookies/storage.\n"
+             "Do not invent private personal data. If the user did not provide a real name, email, phone, address, payment, account, or identifier, skip that field.\n"
+             "Never fill passwords, OTPs, payment cards, banking, SSN, passport, secrets, API keys, hidden fields, or file uploads. Those fields should already be excluded; skip anything that still looks sensitive.\n"
+             "For select/radio fields, use an exact option value from the field's options when possible.\n"
+             "For checkboxes, return true only when the user instruction or page context clearly says it should be checked.\n"
+             "Keep answers concise and valid for field maxlengths.\n\n"
+             "User instructions:\n%@\n\n"
+             "Form snapshot JSON:\n%@\n",
+            instructions.length ? instructions : @"Use visible page context only. Skip personal fields unless the value is obvious from context.",
+            snapshot ?: @"{}"];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)autofillFieldsFromAIOutput:(NSString *)output {
+    id parsed = [self JSONObjectFromAIOutput:output ?: @""];
+    NSArray *rawFields = nil;
+    if ([parsed isKindOfClass:NSDictionary.class]) {
+        id fields = ((NSDictionary *)parsed)[@"fields"];
+        if ([fields isKindOfClass:NSArray.class]) rawFields = fields;
+    } else if ([parsed isKindOfClass:NSArray.class]) {
+        rawFields = parsed;
+    }
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *fields = [NSMutableArray array];
+    for (id item in rawFields ?: @[]) {
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *field = item;
+        NSString *fieldID = [field[@"id"] isKindOfClass:NSString.class] ? field[@"id"] : @"";
+        id value = field[@"value"];
+        if (fieldID.length == 0 || value == nil || value == [NSNull null]) continue;
+        if (![value isKindOfClass:NSString.class] && ![value isKindOfClass:NSNumber.class]) continue;
+        [fields addObject:@{ @"id": fieldID, @"value": value }];
+    }
+    return fields;
+}
+
+- (NSString *)scriptForApplyingAutofillFields:(NSArray<NSDictionary<NSString *, id> *> *)fields {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:fields ?: @[] options:0 error:nil];
+    NSString *json = [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[]";
+    NSString *literal = [self javaScriptStringLiteralForString:json];
+    return [NSString stringWithFormat:
+            @"(() => {"
+             "const fields = JSON.parse(%@);"
+             "const truthy = (value) => /^(1|true|yes|on|checked)$/i.test(String(value));"
+             "const eventOptions = { bubbles: true };"
+             "let filled = 0;"
+             "for (const field of fields) {"
+             "const id = String(field.id || '');"
+             "const candidates = Array.from(document.querySelectorAll('[data-trailbrowser-autofill-id]'));"
+             "const el = candidates.find((node) => node.dataset.trailbrowserAutofillId === id);"
+             "if (!el || el.disabled || el.readOnly) continue;"
+             "const tag = el.tagName.toLowerCase();"
+             "const type = (el.getAttribute('type') || '').toLowerCase();"
+             "const value = field.value;"
+             "if (type === 'checkbox') {"
+             "el.checked = truthy(value);"
+             "} else if (type === 'radio') {"
+             "if (truthy(value) || String(value) === String(el.value)) el.checked = true;"
+             "} else if (tag === 'select') {"
+             "const options = Array.from(el.options);"
+             "const match = options.find((option) => String(option.value) === String(value)) ||"
+             "options.find((option) => option.textContent.trim().toLowerCase() === String(value).trim().toLowerCase());"
+             "if (!match) continue;"
+             "el.value = match.value;"
+             "} else {"
+             "el.value = String(value);"
+             "}"
+             "el.dispatchEvent(new Event('input', eventOptions));"
+             "el.dispatchEvent(new Event('change', eventOptions));"
+             "el.style.transition = 'box-shadow 180ms ease, outline-color 180ms ease';"
+             "el.style.outline = '2px solid rgba(236,107,91,.72)';"
+             "el.style.boxShadow = '0 0 0 4px rgba(236,107,91,.16)';"
+             "window.setTimeout(() => { el.style.outline = ''; el.style.boxShadow = ''; }, 1200);"
+             "filled += 1;"
+             "}"
+             "return filled;"
+             "})()",
+            literal];
+}
+
+- (void)autofillFormsWithAI:(id)sender {
+    (void)sender;
+    if (self.formAutofillInProgress) return;
+    if (!self.webView || ![self isHTTPURL:self.webView.URL]) {
+        NSBeep();
+        return;
+    }
+
+    NSString *instructions = [self promptForAutofillInstructions];
+    if (!instructions) return;
+
+    [self setAutofillWorking:YES];
+    [self formSnapshotWithCompletion:^(NSString *snapshot, NSError *snapshotError) {
+        if (snapshotError) {
+            [self setAutofillWorking:NO];
+            [self showAssistantMessage:snapshotError.localizedDescription ?: @"Could not inspect this form."];
+            return;
+        }
+
+        NSData *snapshotData = [snapshot dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *snapshotObject = snapshotData
+            ? [NSJSONSerialization JSONObjectWithData:snapshotData options:0 error:nil]
+            : nil;
+        NSArray *fields = [snapshotObject[@"fields"] isKindOfClass:NSArray.class] ? snapshotObject[@"fields"] : @[];
+        if (fields.count == 0) {
+            self.pageHasFillableForms = NO;
+            [self setAutofillWorking:NO];
+            [self updateAutofillButton];
+            [self showAssistantMessage:@"No safe fillable fields were found on this page."];
+            return;
+        }
+
+        NSString *prompt = [self autofillPromptForInstructions:instructions snapshot:snapshot];
+        [self runAIWithPrompt:prompt enableSearch:NO effortOverride:@"low" completion:^(NSString *output, NSError *error) {
+            if (error) {
+                [self setAutofillWorking:NO];
+                [self showAssistantMessage:error.localizedDescription ?: @"AI autofill failed."];
+                return;
+            }
+
+            NSArray<NSDictionary<NSString *, id> *> *autofillFields = [self autofillFieldsFromAIOutput:output];
+            if (autofillFields.count == 0) {
+                [self setAutofillWorking:NO];
+                [self showAssistantMessage:@"AI did not return any safe fields to fill."];
+                return;
+            }
+
+            [self.webView evaluateJavaScript:[self scriptForApplyingAutofillFields:autofillFields]
+                           completionHandler:^(id result, NSError *applyError) {
+                [self setAutofillWorking:NO];
+                if (applyError) {
+                    [self showAssistantMessage:applyError.localizedDescription ?: @"Could not apply autofill values."];
+                    return;
+                }
+                NSUInteger filled = [result respondsToSelector:@selector(unsignedIntegerValue)]
+                    ? [result unsignedIntegerValue]
+                    : autofillFields.count;
+                [self setStatusText:[NSString stringWithFormat:@"AI autofilled %lu field%@",
+                                     (unsigned long)filled,
+                                     filled == 1 ? @"" : @"s"]];
+            }];
+        }];
+    }];
+}
+
 - (NSString *)htmlEscaped:(NSString *)text {
     NSString *value = text ?: @"";
     value = [value stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
@@ -6813,6 +7143,7 @@ doCommandBySelector:(SEL)commandSelector {
     [self updateBookmarkButton];
     [self updateSiteInfoButton];
     [self updateDownloadsButton];
+    [self updateAutofillButton];
 }
 
 - (void)syncAddressBarWithWebView {
@@ -6878,6 +7209,7 @@ doCommandBySelector:(SEL)commandSelector {
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
     (void)navigation;
     if (webView != self.webView) return;
+    self.pageHasFillableForms = NO;
     [self setStatusText:@"Loading"];
     [self updateControls];
 }
@@ -6896,6 +7228,7 @@ doCommandBySelector:(SEL)commandSelector {
     if (webView == self.webView) {
         [self setStatusText:@"Ready"];
         [self syncAddressBarWithWebView];
+        [self scheduleFormDetectionForWebView:webView];
     }
     [self recordHistoryEntryForWebView:webView];
     [self writeBrowserStateRunning:YES];
@@ -6906,6 +7239,7 @@ doCommandBySelector:(SEL)commandSelector {
     (void)navigation;
     [self preloadFinishedForWebView:webView];
     if (webView != self.webView) return;
+    self.pageHasFillableForms = NO;
     [self setStatusText:error.localizedDescription ?: @"Failed"];
     [self updateControls];
 }

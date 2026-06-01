@@ -17,6 +17,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   user explicitly chooses a visibility preference.
 - Settings now exposes a tab performance toggle: keep pages loaded by default
   for smooth switching, or enable memory saver to sleep older background tabs.
+- AI form autofill appears on pages with safe fillable fields and uses the
+  selected Codex/Claude CLI after a user confirmation prompt.
 
 ### Changed
 - Refreshed the native chrome and bundled pages with sleek light and dark

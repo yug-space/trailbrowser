@@ -49,6 +49,8 @@ and substantially less once background tabs sleep. Reproduce with
   tabs and critical system memory pressure handling — far lighter than a
   Chromium renderer-per-tab
 - A built-in **page assistant** (Ask / Edit) powered by the `codex` or `claude` CLI
+- AI form autofill appears on pages with safe fillable fields and uses the
+  selected Codex/Claude CLI only after you confirm what to fill
 - A 2px accent loading bar
 - Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+Shift+N`, `Cmd+W`,
   `Cmd+Shift+T`, `Cmd+B`, `Cmd+Shift+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`,
@@ -126,6 +128,16 @@ imported.
 
 It only ever touches the current user's own Chrome data on this machine, never
 sends cookies anywhere, and deletes the temporary database copy when done.
+
+## AI Form Autofill
+
+When a page has visible, non-sensitive form fields, TrailBrowser shows a
+**Fill AI** control in the toolbar. Clicking it asks what the AI should use for
+the form, then sends only form labels, placeholders, nearby form text, page
+headings, and your instruction to the selected `codex` or `claude` CLI.
+Existing field values, cookies, passwords, hidden fields, payment fields,
+one-time codes, and file inputs are excluded. TrailBrowser fills the returned
+values locally and never submits the form.
 
 ## History MCP Server
 
