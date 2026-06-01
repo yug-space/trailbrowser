@@ -50,6 +50,7 @@
 @property (nonatomic, assign) NSInteger tabSwitcherIndex;
 @property (nonatomic, assign) BOOL pageHasFillableForms;
 @property (nonatomic, assign) BOOL formAutofillInProgress;
+@property (nonatomic, copy, nullable) NSString *pendingAutofillInstructionsAfterNavigation;
 @property (nonatomic, assign) BOOL restoringSession;
 @property (nonatomic, assign) BOOL suppressTabSelectionChange;
 @property (nonatomic, strong) NSView *rootView;
@@ -5713,11 +5714,68 @@ doCommandBySelector:(SEL)commandSelector {
          "const s = getComputedStyle(el);"
          "return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && !el.disabled && !el.readOnly;"
          "};"
-         "return Array.from(document.querySelectorAll('input,textarea,select')).some((el) => {"
+         "const hostedFormURL = () => {"
+         "const patterns = [/airtable\\.com\\/embed\\/.*\\/form/i,/airtable\\.com\\/.*\\/form/i,/typeform\\.com\\//i,/tally\\.so\\//i,/forms\\.gle\\//i,/docs\\.google\\.com\\/forms\\//i,/form\\.jotform\\.com\\//i];"
+         "for (const frame of Array.from(document.querySelectorAll('iframe[src]'))) {"
+         "if (!visible(frame)) continue;"
+         "let href = '';"
+         "try { href = new URL(frame.getAttribute('src') || '', location.href).href; } catch (_) {}"
+         "if (href && patterns.some((pattern) => pattern.test(href))) return href;"
+         "}"
+         "return '';"
+         "};"
+         "const hasDirectFields = Array.from(document.querySelectorAll('input,textarea,select,[contenteditable=\"true\"],[role=\"textbox\"]')).some((el) => {"
          "const type = (el.getAttribute('type') || el.tagName || '').toLowerCase();"
          "return !blocked.test(type) && visible(el);"
          "});"
+         "return hasDirectFields || hostedFormURL().length > 0;"
          "})()";
+}
+
+- (NSString *)embeddedFormURLScript {
+    return
+        @"(() => {"
+         "const visible = (el) => {"
+         "const r = el.getBoundingClientRect();"
+         "const s = getComputedStyle(el);"
+         "return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';"
+         "};"
+         "const patterns = [/airtable\\.com\\/embed\\/.*\\/form/i,/airtable\\.com\\/.*\\/form/i,/typeform\\.com\\//i,/tally\\.so\\//i,/forms\\.gle\\//i,/docs\\.google\\.com\\/forms\\//i,/form\\.jotform\\.com\\//i];"
+         "for (const frame of Array.from(document.querySelectorAll('iframe[src]'))) {"
+         "if (!visible(frame)) continue;"
+         "let href = '';"
+         "try { href = new URL(frame.getAttribute('src') || '', location.href).href; } catch (_) {}"
+         "if (href && patterns.some((pattern) => pattern.test(href))) return href;"
+         "}"
+         "return '';"
+         "})()";
+}
+
+- (void)embeddedFormURLWithCompletion:(void (^)(NSString *urlString))completion {
+    if (!self.webView) {
+        completion(@"");
+        return;
+    }
+
+    [self.webView evaluateJavaScript:[self embeddedFormURLScript]
+                   completionHandler:^(id result, NSError *error) {
+        if (error || ![result isKindOfClass:NSString.class]) {
+            completion(@"");
+            return;
+        }
+        completion((NSString *)result);
+    }];
+}
+
+- (BOOL)URLLooksLikeHostedForm:(NSURL *)url {
+    NSString *value = url.absoluteString.lowercaseString ?: @"";
+    if (value.length == 0) return NO;
+    return ([value containsString:@"airtable.com/"] && [value containsString:@"/form"]) ||
+           [value containsString:@"typeform.com/"] ||
+           [value containsString:@"tally.so/"] ||
+           [value containsString:@"forms.gle/"] ||
+           [value containsString:@"docs.google.com/forms/"] ||
+           [value containsString:@"form.jotform.com/"];
 }
 
 - (void)detectFillableFormsForWebView:(WKWebView *)webView {
@@ -5743,6 +5801,12 @@ doCommandBySelector:(SEL)commandSelector {
         [self detectFillableFormsForWebView:webView];
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self detectFillableFormsForWebView:webView];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self detectFillableFormsForWebView:webView];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(7.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self detectFillableFormsForWebView:webView];
     });
 }
@@ -5788,6 +5852,7 @@ doCommandBySelector:(SEL)commandSelector {
          "const labels = Array.from(document.querySelectorAll('label'));"
          "const labelFor = (el) => {"
          "const pieces = [];"
+         "const ariaLabel = el.getAttribute('aria-label'); if (ariaLabel) pieces.push(ariaLabel);"
          "if (el.id) { const exact = labels.find((label) => label.htmlFor === el.id); if (exact) pieces.push(exact.innerText); }"
          "const parentLabel = el.closest('label'); if (parentLabel) pieces.push(parentLabel.innerText);"
          "const describedBy = (el.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean)"
@@ -5799,16 +5864,16 @@ doCommandBySelector:(SEL)commandSelector {
          "const form = el.closest('form,fieldset,section,article,main') || el.parentElement;"
          "if (!form) return '';"
          "const clone = form.cloneNode(true);"
-         "clone.querySelectorAll('script,style,noscript,iframe,svg,img,input,textarea,select,button').forEach((node) => node.remove());"
+         "clone.querySelectorAll('script,style,noscript,iframe,svg,img,input,textarea,select,button,[contenteditable=\"true\"],[role=\"textbox\"]').forEach((node) => node.remove());"
          "return clip(clone.innerText, 600);"
          "};"
          "let seq = window.__trailbrowserAutofillSeq || 1;"
          "const fields = [];"
-         "for (const el of Array.from(document.querySelectorAll('input,textarea,select'))) {"
+         "for (const el of Array.from(document.querySelectorAll('input,textarea,select,[contenteditable=\"true\"],[role=\"textbox\"]'))) {"
          "const tag = el.tagName.toLowerCase();"
-         "const type = tag === 'input' ? (el.getAttribute('type') || 'text').toLowerCase() : tag;"
+         "const type = tag === 'input' ? (el.getAttribute('type') || 'text').toLowerCase() : (el.getAttribute('role') || (el.isContentEditable ? 'contenteditable' : tag)).toLowerCase();"
          "const label = labelFor(el);"
-         "const identity = [label, el.name, el.id, el.placeholder, el.autocomplete, type].join(' ');"
+         "const identity = [label, el.getAttribute('aria-label'), el.name, el.id, el.getAttribute('placeholder'), el.autocomplete, type].join(' ');"
          "if (blocked.test(type) || sensitive.test(identity) || !visible(el)) continue;"
          "if (!el.dataset.trailbrowserAutofillId) el.dataset.trailbrowserAutofillId = String(seq++);"
          "const options = tag === 'select'"
@@ -5818,10 +5883,11 @@ doCommandBySelector:(SEL)commandSelector {
          "id: el.dataset.trailbrowserAutofillId,"
          "tag, type,"
          "label,"
-         "name: clip(el.name, 120),"
+         "name: clip(el.getAttribute('name') || el.name, 120),"
          "domId: clip(el.id, 120),"
-         "placeholder: clip(el.placeholder, 160),"
-         "autocomplete: clip(el.autocomplete, 80),"
+         "ariaLabel: clip(el.getAttribute('aria-label'), 160),"
+         "placeholder: clip(el.getAttribute('placeholder') || el.placeholder, 160),"
+         "autocomplete: clip(el.getAttribute('autocomplete') || el.autocomplete, 80),"
          "required: !!el.required,"
          "maxLength: Number(el.maxLength || 0),"
          "options,"
@@ -5919,6 +5985,9 @@ doCommandBySelector:(SEL)commandSelector {
              "options.find((option) => option.textContent.trim().toLowerCase() === String(value).trim().toLowerCase());"
              "if (!match) continue;"
              "el.value = match.value;"
+             "} else if (el.isContentEditable || el.getAttribute('role') === 'textbox') {"
+             "el.focus();"
+             "el.textContent = String(value);"
              "} else {"
              "el.value = String(value);"
              "}"
@@ -5951,7 +6020,13 @@ doCommandBySelector:(SEL)commandSelector {
 }
 
 - (void)autofillFormsWithInstructions:(NSString *)instructions promptIfEmpty:(BOOL)promptIfEmpty {
-    if (self.formAutofillInProgress) return;
+    [self autofillFormsWithInstructions:instructions promptIfEmpty:promptIfEmpty retryCount:0];
+}
+
+- (void)autofillFormsWithInstructions:(NSString *)instructions
+                        promptIfEmpty:(BOOL)promptIfEmpty
+                            retryCount:(NSInteger)retryCount {
+    if (self.formAutofillInProgress && retryCount == 0) return;
     if (!self.webView || ![self isHTTPURL:self.webView.URL]) {
         NSBeep();
         return;
@@ -5977,10 +6052,33 @@ doCommandBySelector:(SEL)commandSelector {
             : nil;
         NSArray *fields = [snapshotObject[@"fields"] isKindOfClass:NSArray.class] ? snapshotObject[@"fields"] : @[];
         if (fields.count == 0) {
-            self.pageHasFillableForms = NO;
-            [self setAutofillWorking:NO];
-            [self updateAutofillButton];
-            [self showAssistantMessage:@"No safe fillable fields were found on this page."];
+            [self embeddedFormURLWithCompletion:^(NSString *embeddedURLString) {
+                NSString *embedded = [embeddedURLString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
+                NSString *current = self.webView.URL.absoluteString ?: @"";
+                if (embedded.length > 0 && ![embedded isEqualToString:current]) {
+                    self.pendingAutofillInstructionsAfterNavigation = trimmedInstructions;
+                    [self setAutofillWorking:NO];
+                    [self setStatusText:@"Opening embedded form"];
+                    [self loadURLString:embedded];
+                    return;
+                }
+
+                if (retryCount < 2 && [self URLLooksLikeHostedForm:self.webView.URL]) {
+                    [self setStatusText:@"Waiting for form fields"];
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        if (!self.formAutofillInProgress) return;
+                        [self autofillFormsWithInstructions:trimmedInstructions
+                                              promptIfEmpty:NO
+                                                  retryCount:retryCount + 1];
+                    });
+                    return;
+                }
+
+                self.pageHasFillableForms = NO;
+                [self setAutofillWorking:NO];
+                [self updateAutofillButton];
+                [self showAssistantMessage:@"No safe fillable fields were found on this page."];
+            }];
             return;
         }
 
@@ -7277,6 +7375,14 @@ doCommandBySelector:(SEL)commandSelector {
         [self setStatusText:@"Ready"];
         [self syncAddressBarWithWebView];
         [self scheduleFormDetectionForWebView:webView];
+        NSString *pendingAutofill = self.pendingAutofillInstructionsAfterNavigation;
+        if (pendingAutofill.length > 0) {
+            self.pendingAutofillInstructionsAfterNavigation = nil;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (webView != self.webView || ![self isHTTPURL:webView.URL]) return;
+                [self autofillFormsWithInstructions:pendingAutofill promptIfEmpty:NO];
+            });
+        }
     }
     [self recordHistoryEntryForWebView:webView];
     [self writeBrowserStateRunning:YES];

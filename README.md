@@ -139,6 +139,10 @@ Existing field values, cookies, passwords, hidden fields, payment fields,
 one-time codes, and file inputs are excluded. TrailBrowser fills the returned
 values locally and never submits the form.
 
+If a page hosts the form inside a known embedded form provider such as Airtable,
+Google Forms, Typeform, Tally, or Jotform, TrailBrowser opens the embedded form
+directly first so WebKit can inspect and fill the actual fields.
+
 ## History MCP Server
 
 TrailBrowser writes its own browsing history to:
