@@ -321,10 +321,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                              fallback:@"R"
                                               tooltip:@"Reload"
                                                action:@selector(reloadPage:)];
-    self.plusButton = [self toolbarButtonWithSymbol:@"plus"
-                                             fallback:@"+"
-                                              tooltip:@"New Tab"
-                                               action:@selector(newTab:)];
 
     NSView *navDivider = [self hairlineView];
     [toolbar addSubview:navDivider];
@@ -371,18 +367,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     ((TBFlatButton *)self.sidebarToggleButton).active = self.sidebarVisible;
 
-    self.statusDot = [[NSView alloc] initWithFrame:NSZeroRect];
-    self.statusDot.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusDot.wantsLayer = YES;
-    self.statusDot.layer.cornerRadius = 3.0;
-    self.statusDot.layer.backgroundColor = TBOk().CGColor;
-    self.statusDot.toolTip = @"Ready";
-    [toolbar addSubview:self.statusDot];
-
     self.askButton = [[TBPillButton alloc] initWithFrame:NSZeroRect];
     self.askButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.askButton.pillStyle = TBPillStyleSecondary;
-    self.askButton.title = @"Ask";
+    self.askButton.title = @"Ask AI";
     self.askButton.toolTip = @"Open assistant";
     self.askButton.target = self;
     self.askButton.action = @selector(openAssistant:);
@@ -522,7 +510,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self.sidebar addSubview:settingsRow];
 
     for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton,
-                           self.addressContainer, self.reloadButton, self.statusDot, self.plusButton,
+                           self.addressContainer, self.reloadButton,
                            self.askButton, self.bookmarkButton, self.bookmarksButton, self.downloadsButton,
                            self.settingsButton, self.progressBar ]) {
         [toolbar addSubview:view];
@@ -591,18 +579,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
         [self.askButton.trailingAnchor constraintEqualToAnchor:self.bookmarkButton.leadingAnchor constant:-8.0],
         [self.askButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-        [self.askButton.widthAnchor constraintEqualToConstant:44.0],
+        [self.askButton.widthAnchor constraintEqualToConstant:68.0],
         [self.askButton.heightAnchor constraintEqualToConstant:28.0],
 
-        [self.plusButton.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-6.0],
-        [self.plusButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-
-        [self.statusDot.trailingAnchor constraintEqualToAnchor:self.plusButton.leadingAnchor constant:-10.0],
-        [self.statusDot.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-        [self.statusDot.widthAnchor constraintEqualToConstant:6.0],
-        [self.statusDot.heightAnchor constraintEqualToConstant:6.0],
-
-        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.statusDot.leadingAnchor constant:-10.0],
+        [self.reloadButton.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-10.0],
         [self.reloadButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
         [self.progressBar.leadingAnchor constraintEqualToAnchor:toolbar.leadingAnchor],
@@ -773,25 +753,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)setStatusText:(NSString *)text {
-    NSColor *dotColor = TBMuted();
-    if ([text isEqualToString:@"Ready"]) {
-        dotColor = TBOk();
-    } else if ([text isEqualToString:@"Loading"]) {
-        dotColor = TBAccent();
-    } else if ([text hasPrefix:@"Zoom"] ||
-               [text hasPrefix:@"Bookmark"] ||
-               [text hasPrefix:@"Download"] ||
-               [text hasPrefix:@"Clearing"] ||
-               [text hasPrefix:@"Website data"] ||
-               [text hasPrefix:@"Site permission"] ||
-               [text hasPrefix:@"Clustering"] ||
-               [text hasPrefix:@"History clusters"]) {
-        dotColor = TBAccent();
-    } else if (text.length > 0) {
-        dotColor = TBError();
-    }
-    self.statusDot.layer.backgroundColor = dotColor.CGColor;
-    self.statusDot.toolTip = text.length ? text : @"Ready";
+    self.addressContainer.toolTip = text.length ? text : @"Ready";
 }
 
 - (NSButton *)toolbarButtonWithSymbol:(NSString *)symbol
