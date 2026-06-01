@@ -15,7 +15,7 @@ Status keys:
 | Area | Status | Current implementation | Main files |
 |------|--------|------------------------|------------|
 | Navigation | Done | Address/search bar, back/forward/reload/home, command-click background tabs, popup tabs. | `BrowserAppDelegate.m` |
-| Tabs | Done | Sidebar tabs, close/new, favicon/title, live tab switching, memory-pressure sleeping, `Cmd+Opt+Tab` switcher, `Cmd+Shift+T` closed-tab restore, and tab context actions for reload, duplicate, close others, and close tabs to the right. | `BrowserAppDelegate.m`, `BrowserTabViews.*` |
+| Tabs | Done | Sidebar tabs, drag reordering, close/new, favicon/title, live tab switching, memory-pressure sleeping, `Cmd+Opt+Tab` switcher, `Cmd+Shift+T` closed-tab restore, and tab context actions for reload, duplicate, move, close others, and close tabs to the right. | `BrowserAppDelegate.m`, `BrowserTabViews.*` |
 | Private browsing | Partial | Private tabs use `WKWebsiteDataStore nonPersistentDataStore` and are excluded from history/session restore. Separate private windows and policy controls are not implemented. | `BrowserTab.h`, `BrowserAppDelegate.m` |
 | Session restore | Done | Persists normal tabs, recently closed normal tabs, active index, sidebar state, and window frame under Application Support. | `BrowserAppDelegate.m` |
 | History | Done | Local redacted `history.jsonl`, Settings browser with automatic topic clusters, optional cached AI clustering, clear action, read-only MCP server. | `BrowserAppDelegate.m`, `Settings.*`, `mcp-history-server/` |

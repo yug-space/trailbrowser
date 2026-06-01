@@ -47,6 +47,7 @@
 @property (nonatomic, assign) BOOL tabSwitcherVisible;
 @property (nonatomic, assign) NSInteger tabSwitcherIndex;
 @property (nonatomic, assign) BOOL restoringSession;
+@property (nonatomic, assign) BOOL suppressTabSelectionChange;
 - (NSString *)sitePermissionSummaryForURL:(NSURL *)url;
 @end
 
@@ -66,6 +67,7 @@ static NSString * const TBSitePermissionMicrophone = @"microphone";
 static NSString * const TBSitePermissionAsk = @"ask";
 static NSString * const TBSitePermissionAllow = @"allow";
 static NSString * const TBSitePermissionDeny = @"deny";
+static NSString * const TBTabDragPasteboardType = @"com.trailbrowser.tab-row";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -175,6 +177,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                  menu:navMenu];
     [self addMenuItem:@"Close Tab" action:@selector(closeCurrentTab:) key:@"w" menu:navMenu];
     [self addMenuItem:@"Duplicate Tab" action:@selector(duplicateCurrentTab:) key:@"" menu:navMenu];
+    [self addMenuItem:@"Move Tab Up" action:@selector(moveCurrentTabUp:) key:@"" menu:navMenu];
+    [self addMenuItem:@"Move Tab Down" action:@selector(moveCurrentTabDown:) key:@"" menu:navMenu];
     [self addMenuItem:@"Close Other Tabs" action:@selector(closeOtherTabsForCurrentTab:) key:@"" menu:navMenu];
     [self addMenuItem:@"Close Tabs to the Right" action:@selector(closeTabsToRightForCurrentTab:) key:@"" menu:navMenu];
     [self addMenuItem:@"Reopen Closed Tab"
@@ -280,6 +284,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (menuItem.action == @selector(closeTabsToRightForCurrentTab:)) {
         return self.activeTabIndex >= 0 && self.activeTabIndex < (NSInteger)self.tabs.count - 1;
     }
+    if (menuItem.action == @selector(moveCurrentTabUp:)) {
+        return self.activeTabIndex > 0;
+    }
+    if (menuItem.action == @selector(moveCurrentTabDown:)) {
+        return self.activeTabIndex >= 0 && self.activeTabIndex < (NSInteger)self.tabs.count - 1;
+    }
     if (menuItem.action == @selector(reloadTabFromMenu:) ||
         menuItem.action == @selector(duplicateTabFromMenu:) ||
         menuItem.action == @selector(closeTabFromMenu:)) {
@@ -291,6 +301,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return row >= 0 && row < (NSInteger)self.tabs.count && self.tabs.count > 1;
     }
     if (menuItem.action == @selector(closeTabsToRightFromMenu:)) {
+        NSInteger row = menuItem.tag;
+        return row >= 0 && row < (NSInteger)self.tabs.count - 1;
+    }
+    if (menuItem.action == @selector(moveTabUpFromMenu:)) {
+        NSInteger row = menuItem.tag;
+        return row > 0 && row < (NSInteger)self.tabs.count;
+    }
+    if (menuItem.action == @selector(moveTabDownFromMenu:)) {
         NSInteger row = menuItem.tag;
         return row >= 0 && row < (NSInteger)self.tabs.count - 1;
     }
@@ -525,6 +543,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabContextMenu = [[NSMenu alloc] initWithTitle:@"Tab"];
     self.tabContextMenu.delegate = self;
     self.tabTable.menu = self.tabContextMenu;
+    [self.tabTable registerForDraggedTypes:@[ TBTabDragPasteboardType ]];
 
     if (@available(macOS 11.0, *)) self.tabTable.style = NSTableViewStylePlain;
 
@@ -2208,6 +2227,48 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)duplicateCurrentTab:(id)sender {
     (void)sender;
     [self duplicateTabAtIndex:self.activeTabIndex select:YES];
+}
+
+- (BOOL)moveTabFromIndex:(NSInteger)sourceIndex toDropIndex:(NSInteger)dropIndex {
+    if (sourceIndex < 0 || sourceIndex >= (NSInteger)self.tabs.count) return NO;
+
+    NSInteger boundedDropIndex = MIN(MAX(dropIndex, 0), (NSInteger)self.tabs.count);
+    if (boundedDropIndex == sourceIndex || boundedDropIndex == sourceIndex + 1) return NO;
+
+    BrowserTab *movingTab = self.tabs[(NSUInteger)sourceIndex];
+    BrowserTab *activeTab = [self activeTab];
+    [self.tabs removeObjectAtIndex:(NSUInteger)sourceIndex];
+
+    NSInteger destinationIndex = boundedDropIndex;
+    if (destinationIndex > sourceIndex) destinationIndex -= 1;
+    destinationIndex = MIN(MAX(destinationIndex, 0), (NSInteger)self.tabs.count);
+    [self.tabs insertObject:movingTab atIndex:(NSUInteger)destinationIndex];
+
+    NSUInteger activeIndex = activeTab ? [self.tabs indexOfObject:activeTab] : NSNotFound;
+    self.activeTabIndex = activeIndex == NSNotFound ? -1 : (NSInteger)activeIndex;
+    self.suppressTabSelectionChange = YES;
+    [self.tabTable reloadData];
+    if (self.activeTabIndex >= 0) {
+        [self.tabTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)self.activeTabIndex]
+                   byExtendingSelection:NO];
+    }
+    self.suppressTabSelectionChange = NO;
+    [self.tabTable scrollRowToVisible:destinationIndex];
+    [self refreshActiveRowHighlight];
+    if (self.tabSwitcherVisible) [self refreshTabSwitcher];
+    [self setStatusText:@"Moved tab"];
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
+    return YES;
+}
+
+- (void)moveCurrentTabUp:(id)sender {
+    (void)sender;
+    [self moveTabFromIndex:self.activeTabIndex toDropIndex:self.activeTabIndex - 1];
+}
+
+- (void)moveCurrentTabDown:(id)sender {
+    (void)sender;
+    [self moveTabFromIndex:self.activeTabIndex toDropIndex:self.activeTabIndex + 2];
 }
 
 - (void)closeTabsExceptIndex:(NSInteger)keepIndex {
@@ -5828,6 +5889,15 @@ doCommandBySelector:(SEL)commandSelector {
                                                     row:row
                                                 enabled:YES]];
         [menu addItem:[NSMenuItem separatorItem]];
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Move Tab Up"
+                                                 action:@selector(moveTabUpFromMenu:)
+                                                    row:row
+                                                enabled:row > 0]];
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Move Tab Down"
+                                                 action:@selector(moveTabDownFromMenu:)
+                                                    row:row
+                                                enabled:row < (NSInteger)self.tabs.count - 1]];
+        [menu addItem:[NSMenuItem separatorItem]];
         [menu addItem:[self tabContextMenuItemWithTitle:@"Close Tab"
                                                  action:@selector(closeTabFromMenu:)
                                                     row:row
@@ -5861,6 +5931,16 @@ doCommandBySelector:(SEL)commandSelector {
     [self duplicateTabAtIndex:[sender tag] select:YES];
 }
 
+- (void)moveTabUpFromMenu:(id)sender {
+    NSInteger row = [sender tag];
+    [self moveTabFromIndex:row toDropIndex:row - 1];
+}
+
+- (void)moveTabDownFromMenu:(id)sender {
+    NSInteger row = [sender tag];
+    [self moveTabFromIndex:row toDropIndex:row + 2];
+}
+
 - (void)closeTabFromMenu:(id)sender {
     [self closeTabAtIndex:[sender tag]];
 }
@@ -5876,6 +5956,48 @@ doCommandBySelector:(SEL)commandSelector {
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
     (void)tableView;
     return (NSInteger)self.tabs.count;
+}
+
+- (NSInteger)draggedTabIndexFromPasteboard:(NSPasteboard *)pasteboard {
+    NSString *value = [pasteboard stringForType:TBTabDragPasteboardType];
+    if (value.length == 0) return -1;
+    return value.integerValue;
+}
+
+- (id<NSPasteboardWriting>)tableView:(NSTableView *)tableView pasteboardWriterForRow:(NSInteger)row {
+    if (tableView != self.tabTable || row < 0 || row >= (NSInteger)self.tabs.count) return nil;
+
+    NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
+    [item setString:[NSString stringWithFormat:@"%ld", (long)row] forType:TBTabDragPasteboardType];
+    return item;
+}
+
+- (NSDragOperation)tableView:(NSTableView *)tableView
+                validateDrop:(id<NSDraggingInfo>)info
+                  proposedRow:(NSInteger)row
+        proposedDropOperation:(NSTableViewDropOperation)dropOperation {
+    if (tableView != self.tabTable || info.draggingSource != self.tabTable) return NSDragOperationNone;
+
+    NSInteger sourceIndex = [self draggedTabIndexFromPasteboard:info.draggingPasteboard];
+    if (sourceIndex < 0 || sourceIndex >= (NSInteger)self.tabs.count) return NSDragOperationNone;
+    if (dropOperation != NSTableViewDropAbove) {
+        [tableView setDropRow:row dropOperation:NSTableViewDropAbove];
+    }
+
+    NSInteger dropIndex = MIN(MAX(row, 0), (NSInteger)self.tabs.count);
+    if (dropIndex == sourceIndex || dropIndex == sourceIndex + 1) return NSDragOperationNone;
+    return NSDragOperationMove;
+}
+
+- (BOOL)tableView:(NSTableView *)tableView
+       acceptDrop:(id<NSDraggingInfo>)info
+              row:(NSInteger)row
+    dropOperation:(NSTableViewDropOperation)dropOperation {
+    (void)dropOperation;
+    if (tableView != self.tabTable || info.draggingSource != self.tabTable) return NO;
+
+    NSInteger sourceIndex = [self draggedTabIndexFromPasteboard:info.draggingPasteboard];
+    return [self moveTabFromIndex:sourceIndex toDropIndex:row];
 }
 
 - (NSTableRowView *)tableView:(NSTableView *)tableView rowViewForRow:(NSInteger)row {
@@ -6125,6 +6247,7 @@ doCommandBySelector:(SEL)commandSelector {
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
     if (notification.object != self.tabTable) return;
+    if (self.suppressTabSelectionChange) return;
     NSInteger row = self.tabTable.selectedRow;
     if (row >= 0 && row != self.activeTabIndex) {
         [self selectTabAtIndex:row];
