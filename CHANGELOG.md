@@ -15,6 +15,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned tabs with session restore and reopen-closed-tab preservation.
 - Bookmarks bar now appears automatically when saved bookmarks exist until the
   user explicitly chooses a visibility preference.
+- Settings now exposes a tab performance toggle: keep pages loaded by default
+  for smooth switching, or enable memory saver to sleep older background tabs.
 
 ### Changed
 - Refreshed the native chrome and bundled pages with sleek light and dark

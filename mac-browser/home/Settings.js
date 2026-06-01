@@ -2,6 +2,7 @@ const syncButton = document.getElementById("sync-cookies");
 const homeButton = document.getElementById("open-home");
 const themeModeSelect = document.getElementById("theme-mode");
 const bookmarkBarToggle = document.getElementById("bookmark-bar-toggle");
+const keepTabsLoadedToggle = document.getElementById("keep-tabs-loaded-toggle");
 const engineSelect = document.getElementById("ai-engine");
 const modelSelect = document.getElementById("ai-model");
 const speedSelect = document.getElementById("codex-speed");
@@ -132,6 +133,11 @@ themeModeSelect.addEventListener("change", () => {
 bookmarkBarToggle.checked = Boolean(window.__tbBookmarkBarVisible);
 bookmarkBarToggle.addEventListener("change", () => {
   setPref("bookmarkBar", bookmarkBarToggle.checked ? "1" : "0");
+});
+
+keepTabsLoadedToggle.checked = window.__tbKeepTabsLoaded !== false;
+keepTabsLoadedToggle.addEventListener("change", () => {
+  setPref("keepTabsLoaded", keepTabsLoadedToggle.checked ? "1" : "0");
 });
 
 const historyEntries = Array.isArray(window.__tbHistory) ? window.__tbHistory : [];

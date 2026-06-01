@@ -55,7 +55,7 @@
 
 @implementation BrowserAppDelegate
 
-static const NSInteger kMaxLiveTabs = NSIntegerMax;
+static const NSInteger kMemorySaverMaxLiveTabs = 6;
 static const NSInteger kMaxConcurrentPreloads = 2;
 static const NSInteger kMaxVisibleSwitcherTabs = 10;
 static const NSInteger kMaxRecentlyClosedTabs = 20;
@@ -73,6 +73,7 @@ static NSString * const TBTabDragPasteboardType = @"com.trailbrowser.tab-row";
 static NSString * const TBBookmarkBarVisibleKey = @"TBBookmarkBarVisible";
 static NSString * const TBBookmarkBarUserConfiguredKey = @"TBBookmarkBarUserConfigured";
 static NSString * const TBThemeModeDefaultsKey = @"TBThemeMode";
+static NSString * const TBKeepTabsLoadedKey = @"TBKeepTabsLoaded";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -2216,6 +2217,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                                       dispatch_get_main_queue());
     __weak BrowserAppDelegate *weakSelf = self;
     dispatch_source_set_event_handler(source, ^{
+        unsigned long pressure = dispatch_source_get_data(source);
+        if ([weakSelf keepTabsLoaded] && !(pressure & DISPATCH_MEMORYPRESSURE_CRITICAL)) {
+            return;
+        }
         [weakSelf sleepAllInactiveTabs];
     });
     dispatch_resume(source);
@@ -2234,11 +2239,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)enforceLiveTabBudget {
+    NSInteger liveTabBudget = [self liveTabBudget];
+    if (liveTabBudget == NSIntegerMax) return;
+
     NSMutableArray<BrowserTab *> *live = [NSMutableArray array];
     for (BrowserTab *tab in self.tabs) {
         if (tab.webView && tab != [self activeTab]) [live addObject:tab];
     }
-    if ((NSInteger)live.count <= kMaxLiveTabs - 1) return;
+    if ((NSInteger)live.count <= liveTabBudget - 1) return;
 
     [live sortUsingComparator:^NSComparisonResult(BrowserTab *a, BrowserTab *b) {
         if (a.lastActiveSeq < b.lastActiveSeq) return NSOrderedAscending;
@@ -2246,10 +2254,45 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return NSOrderedSame;
     }];
 
-    NSInteger excess = (NSInteger)live.count - (kMaxLiveTabs - 1);
+    NSInteger excess = (NSInteger)live.count - (liveTabBudget - 1);
     for (NSInteger i = 0; i < excess; i++) {
         [self sleepTab:live[(NSUInteger)i]];
     }
+}
+
+- (BOOL)keepTabsLoaded {
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:TBKeepTabsLoadedKey];
+    return value ? [value boolValue] : YES;
+}
+
+- (NSInteger)liveTabBudget {
+    return [self keepTabsLoaded] ? NSIntegerMax : kMemorySaverMaxLiveTabs;
+}
+
+- (void)preloadAllInactiveTabs {
+    BrowserTab *active = [self activeTab];
+    for (BrowserTab *tab in self.tabs) {
+        if (tab == active) continue;
+        if (tab.webView) {
+            [self loadContentForTab:tab];
+        } else {
+            [self preloadTab:tab];
+        }
+    }
+}
+
+- (void)setKeepTabsLoaded:(BOOL)keepTabsLoaded {
+    [[NSUserDefaults standardUserDefaults] setBool:keepTabsLoaded forKey:TBKeepTabsLoadedKey];
+    if (keepTabsLoaded) {
+        [self preloadAllInactiveTabs];
+    } else {
+        [self enforceLiveTabBudget];
+    }
+    if (self.tabs.count > 0) {
+        NSIndexSet *rows = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.tabs.count)];
+        [self.tabTable reloadDataForRowIndexes:rows columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+    }
+    [self writeBrowserStateRunning:YES];
 }
 
 - (void)loadContentForTab:(BrowserTab *)tab {
@@ -2901,6 +2944,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             [self setThemeModeName:value persist:YES];
             return YES;
         }
+        if ([key isEqualToString:@"keepTabsLoaded"]) {
+            NSString *normalized = value.lowercaseString ?: @"";
+            BOOL keepTabsLoaded = [normalized isEqualToString:@"1"] ||
+                                  [normalized isEqualToString:@"true"] ||
+                                  [normalized isEqualToString:@"yes"];
+            [self setKeepTabsLoaded:keepTabsLoaded];
+            return YES;
+        }
         NSDictionary<NSString *, NSString *> *allowed = @{ @"aiEngine": @"TBAIEngine",
                                                            @"codexModel": @"TBCodexModel",
                                                            @"claudeModel": @"TBClaudeModel",
@@ -2944,13 +2995,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
     NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
     NSString *bookmarkBar = self.bookmarkBarVisible ? @"true" : @"false";
+    NSString *keepTabsLoaded = [self keepTabsLoaded] ? @"true" : @"false";
     NSString *themeMode = TBThemeModeName(TBThemeCurrentMode());
     return [NSString stringWithFormat:
         @"<script>document.documentElement.dataset.theme=\"%@\";"
          "window.__tbThemeMode=\"%@\";window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
          "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";"
-         "window.__tbBookmarkBarVisible=%@;</script></head>",
-        themeMode, themeMode, engine, codexModel, claudeModel, effort, bookmarkBar];
+         "window.__tbBookmarkBarVisible=%@;window.__tbKeepTabsLoaded=%@;</script></head>",
+        themeMode, themeMode, engine, codexModel, claudeModel, effort, bookmarkBar, keepTabsLoaded];
 }
 
 - (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
@@ -3428,6 +3480,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         @"activeTabIndex": @([self stateActiveTabIndex]),
         @"sidebarVisible": @(self.sidebarVisible),
         @"bookmarkBarVisible": @(self.bookmarkBarVisible),
+        @"keepTabsLoaded": @([self keepTabsLoaded]),
         @"windowFrame": self.window ? NSStringFromRect(self.window.frame) : @"",
         @"cookiesExposed": @NO
     };

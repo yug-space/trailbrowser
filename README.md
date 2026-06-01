@@ -44,9 +44,10 @@ and substantially less once background tabs sleep. Reproduce with
   dimmed when slept), drag reordering, hover-to-close, `Cmd+Shift+T` closed-tab
   restore, and right-click actions for duplicate / move / bulk close
 - **Efficient memory & process use:** WebKit shares content processes across
-  tabs over one shared data store; recently-used tabs stay live (instant switch
-  back) while older and background tabs are slept under a budget and on system
-  memory pressure — far lighter than a Chromium renderer-per-tab
+  tabs over one shared data store; tabs stay loaded by default for instant
+  switching, with a Settings memory-saver toggle for sleeping older background
+  tabs and critical system memory pressure handling — far lighter than a
+  Chromium renderer-per-tab
 - A built-in **page assistant** (Ask / Edit) powered by the `codex` or `claude` CLI
 - A 2px accent loading bar
 - Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+Shift+N`, `Cmd+W`,
@@ -171,10 +172,11 @@ The web page itself is rendered by WebKit: `WKWebView` displays the site;
 `loadRequest:`, `goBack`, `goForward`, and `reload` drive navigation; and
 key-value observing tracks `estimatedProgress`, `URL`, `canGoBack`, and
 `canGoForward` so the UI stays in sync. All web views share the default
-`WKWebsiteDataStore` (WebKit consolidates content processes automatically), a
-bounded pool of recently-used tabs stays live so switching back is instant, and
-tabs beyond that pool — or all background tabs under system memory pressure —
-are slept (their `WKWebView` released, keeping only URL/title/favicon).
+`WKWebsiteDataStore` (WebKit consolidates content processes automatically).
+Tabs stay live by default so switching back is instant. If memory saver is
+enabled in Settings, older background tabs are slept (their `WKWebView`
+released, keeping only URL/title/favicon); critical system memory pressure can
+also sleep background tabs.
 
 This is a native browser shell, not a custom browser engine. WebKit handles
 parsing HTML, applying CSS, running JavaScript, loading images, and navigation.
