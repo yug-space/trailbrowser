@@ -24,7 +24,7 @@ APP_HEADERS = mac-browser/BrowserAppDelegate.h \
 APP_HOME_RESOURCES = mac-browser/home/Home.html mac-browser/home/Home.css mac-browser/home/Home.js \
                      mac-browser/home/Settings.html mac-browser/home/Settings.css mac-browser/home/Settings.js \
                      mac-browser/home/Onboarding.html mac-browser/home/Onboarding.css mac-browser/home/Onboarding.js
-APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security -framework QuartzCore
+APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security -framework QuartzCore -framework UniformTypeIdentifiers
 APP_LIBS = -lsqlite3
 
 APP_ICON = assets/TrailBrowser.icns

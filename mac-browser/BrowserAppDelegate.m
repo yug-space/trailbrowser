@@ -1,6 +1,7 @@
 #import "BrowserAppDelegate.h"
 
 #import <QuartzCore/QuartzCore.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import "BrowserTab.h"
 #import "BrowserTabViews.h"
@@ -13,12 +14,51 @@
 @property (nonatomic, strong) dispatch_source_t memoryPressureSource;
 @property (nonatomic, strong) NSMutableArray<BrowserTab *> *preloadQueue;
 @property (nonatomic, strong) NSMutableSet<WKWebView *> *preloadingWebViews;
+@property (nonatomic, strong) NSMutableSet<WKDownload *> *activeDownloads;
+@property (nonatomic, strong) NSMapTable<WKDownload *, NSMutableDictionary<NSString *, id> *> *downloadMetadata;
+@property (nonatomic, strong) NSTimer *downloadRefreshTimer;
+@property (nonatomic, strong) NSVisualEffectView *addressSuggestionsPanel;
+@property (nonatomic, strong) NSStackView *addressSuggestionsStack;
+@property (nonatomic, strong) NSLayoutConstraint *addressSuggestionsHeightConstraint;
+@property (nonatomic, copy) NSArray<NSDictionary<NSString *, NSString *> *> *addressSuggestions;
+@property (nonatomic, assign) NSInteger addressSuggestionIndex;
+@property (nonatomic, strong) NSButton *siteInfoButton;
+@property (nonatomic, strong) NSButton *bookmarkButton;
+@property (nonatomic, strong) NSButton *bookmarksButton;
+@property (nonatomic, strong) NSPopover *bookmarksPopover;
+@property (nonatomic, strong) NSButton *downloadsButton;
+@property (nonatomic, strong) NSPopover *downloadsPopover;
+@property (nonatomic, strong) NSVisualEffectView *findBar;
+@property (nonatomic, strong) NSTextField *findField;
+@property (nonatomic, strong) NSTextField *findStatusLabel;
+@property (nonatomic, strong) NSButton *findPreviousButton;
+@property (nonatomic, strong) NSButton *findNextButton;
+@property (nonatomic, strong) NSButton *findCloseButton;
+@property (nonatomic, strong) id tabSwitcherEventMonitor;
+@property (nonatomic, strong) NSVisualEffectView *tabSwitcherPanel;
+@property (nonatomic, strong) NSStackView *tabSwitcherStack;
+@property (nonatomic, strong) NSLayoutConstraint *tabSwitcherWidthConstraint;
+@property (nonatomic, assign) BOOL tabSwitcherVisible;
+@property (nonatomic, assign) NSInteger tabSwitcherIndex;
+@property (nonatomic, assign) BOOL restoringSession;
+- (NSString *)sitePermissionSummaryForURL:(NSURL *)url;
 @end
 
 @implementation BrowserAppDelegate
 
-static const NSInteger kMaxLiveTabs = 24;
+static const NSInteger kMaxLiveTabs = NSIntegerMax;
 static const NSInteger kMaxConcurrentPreloads = 2;
+static const NSInteger kMaxVisibleSwitcherTabs = 10;
+static const unsigned short kTabKeyCode = 48;
+static const unsigned short kEscapeKeyCode = 53;
+static const unsigned short kReturnKeyCode = 36;
+static const unsigned short kLeftArrowKeyCode = 123;
+static const unsigned short kRightArrowKeyCode = 124;
+static NSString * const TBSitePermissionCamera = @"camera";
+static NSString * const TBSitePermissionMicrophone = @"microphone";
+static NSString * const TBSitePermissionAsk = @"ask";
+static NSString * const TBSitePermissionAllow = @"allow";
+static NSString * const TBSitePermissionDeny = @"deny";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -30,7 +70,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     [self buildMenu];
     [self buildWindow];
-    [self writeBrowserStateRunning:YES];
     [self startMemoryPressureMonitor];
 
     NSArray<NSString *> *urlArgs = [self launchURLArguments];
@@ -38,6 +77,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         for (NSUInteger i = 0; i < urlArgs.count; i++) {
             [self newTabWithURLString:urlArgs[i] select:(i == urlArgs.count - 1)];
         }
+        [self writeBrowserStateRunning:YES];
         return;
     }
 
@@ -46,9 +86,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (!onboarded) {
         [defaults setBool:YES forKey:@"TBHasOnboarded"];
         [self newTabWithURLString:[self onboardingURLString] select:YES];
-    } else {
+    } else if (![self restorePreviousSessionIfAvailable]) {
         [self newTabWithURLString:[self homeURLString] select:YES];
     }
+    [self writeBrowserStateRunning:YES];
 }
 
 - (NSArray<NSString *> *)launchURLArguments {
@@ -71,6 +112,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)dealloc {
     if (_memoryPressureSource) dispatch_source_cancel(_memoryPressureSource);
+    if (_tabSwitcherEventMonitor) [NSEvent removeMonitor:_tabSwitcherEventMonitor];
+    [_downloadRefreshTimer invalidate];
     for (BrowserTab *tab in self.tabs) {
         [self removeObserversFromWebView:tab.webView];
         [tab.webView stopLoading];
@@ -98,6 +141,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [appMenu addItem:quitItem];
     [appMenuItem setSubmenu:appMenu];
 
+    NSMenuItem *fileMenuItem = [[NSMenuItem alloc] initWithTitle:@"File"
+                                                          action:nil
+                                                   keyEquivalent:@""];
+    [mainMenu addItem:fileMenuItem];
+    NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+    [self addMenuItem:@"Open File…" action:@selector(openFile:) key:@"o" menu:fileMenu];
+    [self addMenuItem:@"Save Page as PDF…" action:@selector(exportPageAsPDF:) key:@"s" menu:fileMenu];
+    [self addMenuItem:@"Print…" action:@selector(printPage:) key:@"p" menu:fileMenu];
+    [fileMenuItem setSubmenu:fileMenu];
+
     NSMenuItem *navMenuItem = [[NSMenuItem alloc] initWithTitle:@"Navigate"
                                                          action:nil
                                                   keyEquivalent:@""];
@@ -107,7 +160,18 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self addMenuItem:@"Open Location" action:@selector(focusAddressBar:) key:@"l" menu:navMenu];
     [self addMenuItem:@"Toggle Sidebar" action:@selector(toggleSidebar:) key:@"b" menu:navMenu];
     [self addMenuItem:@"New Tab" action:@selector(newTab:) key:@"t" menu:navMenu];
+    [self addMenuItem:@"New Private Tab"
+               action:@selector(newPrivateTab:)
+                  key:@"n"
+            modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagShift)
+                 menu:navMenu];
     [self addMenuItem:@"Close Tab" action:@selector(closeCurrentTab:) key:@"w" menu:navMenu];
+    [self addMenuItem:@"Bookmark This Page" action:@selector(toggleBookmarkCurrentPage:) key:@"d" menu:navMenu];
+    [self addMenuItem:@"Switch Tabs"
+               action:@selector(showTabSwitcherFromMenu:)
+                  key:@"\t"
+            modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)
+                 menu:navMenu];
     [navMenu addItem:[NSMenuItem separatorItem]];
     [self addMenuItem:@"Home" action:@selector(goHome:) key:@"" menu:navMenu];
     [self addMenuItem:@"Reload" action:@selector(reloadPage:) key:@"r" menu:navMenu];
@@ -115,6 +179,21 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self addMenuItem:@"Back" action:@selector(goBack:) key:@"[" menu:navMenu];
     [self addMenuItem:@"Forward" action:@selector(goForward:) key:@"]" menu:navMenu];
     [navMenuItem setSubmenu:navMenu];
+
+    NSMenuItem *viewMenuItem = [[NSMenuItem alloc] initWithTitle:@"View" action:nil keyEquivalent:@""];
+    [mainMenu addItem:viewMenuItem];
+    NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+    [self addMenuItem:@"Page Info" action:@selector(showPageInfo:) key:@"" menu:viewMenu];
+    [self addMenuItem:@"View Source"
+               action:@selector(viewSource:)
+                  key:@"u"
+            modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)
+                 menu:viewMenu];
+    [viewMenu addItem:[NSMenuItem separatorItem]];
+    [self addMenuItem:@"Actual Size" action:@selector(resetPageZoom:) key:@"0" menu:viewMenu];
+    [self addMenuItem:@"Zoom In" action:@selector(zoomIn:) key:@"=" menu:viewMenu];
+    [self addMenuItem:@"Zoom Out" action:@selector(zoomOut:) key:@"-" menu:viewMenu];
+    [viewMenuItem setSubmenu:viewMenu];
 
     NSMenuItem *editMenuItem = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
     [mainMenu addItem:editMenuItem];
@@ -126,15 +205,31 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self addEditItem:@"Copy" action:@selector(copy:) key:@"c" shift:NO menu:editMenu];
     [self addEditItem:@"Paste" action:@selector(paste:) key:@"v" shift:NO menu:editMenu];
     [self addEditItem:@"Select All" action:@selector(selectAll:) key:@"a" shift:NO menu:editMenu];
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    [self addEditItem:@"Find…" action:@selector(showFindBar:) key:@"f" shift:NO menu:editMenu];
+    [self addEditItem:@"Find Next" action:@selector(findNext:) key:@"g" shift:NO menu:editMenu];
+    [self addEditItem:@"Find Previous" action:@selector(findPrevious:) key:@"g" shift:YES menu:editMenu];
     [editMenuItem setSubmenu:editMenu];
 
     [NSApp setMainMenu:mainMenu];
 }
 
 - (void)addMenuItem:(NSString *)title action:(SEL)action key:(NSString *)key menu:(NSMenu *)menu {
+    [self addMenuItem:title
+               action:action
+                  key:key
+            modifiers:NSEventModifierFlagCommand
+                 menu:menu];
+}
+
+- (void)addMenuItem:(NSString *)title
+             action:(SEL)action
+                key:(NSString *)key
+          modifiers:(NSEventModifierFlags)modifiers
+               menu:(NSMenu *)menu {
     NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:key];
     item.target = self;
-    item.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+    item.keyEquivalentModifierMask = modifiers;
     [menu addItem:item];
 }
 
@@ -219,16 +314,21 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressContainer.translatesAutoresizingMaskIntoConstraints = NO;
     [toolbar addSubview:self.addressContainer];
 
-    NSImageView *addressIcon = [[NSImageView alloc] initWithFrame:NSZeroRect];
-    addressIcon.translatesAutoresizingMaskIntoConstraints = NO;
-    addressIcon.imageScaling = NSImageScaleProportionallyDown;
+    self.siteInfoButton = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+    self.siteInfoButton.translatesAutoresizingMaskIntoConstraints = NO;
+    ((TBFlatButton *)self.siteInfoButton).cornerRadius = 6.0;
+    self.siteInfoButton.imagePosition = NSImageOnly;
+    self.siteInfoButton.imageScaling = NSImageScaleProportionallyDown;
+    self.siteInfoButton.target = self;
+    self.siteInfoButton.action = @selector(showPageInfo:);
+    self.siteInfoButton.toolTip = @"Page info";
     if (@available(macOS 11.0, *)) {
-        NSImage *glyph = [NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:@"Search"];
+        NSImage *glyph = [NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:@"Page info"];
         glyph.template = YES;
-        addressIcon.image = glyph;
+        self.siteInfoButton.image = glyph;
     }
-    if (@available(macOS 10.14, *)) addressIcon.contentTintColor = TBFaint();
-    [self.addressContainer addSubview:addressIcon];
+    if (@available(macOS 10.14, *)) self.siteInfoButton.contentTintColor = TBFaint();
+    [self.addressContainer addSubview:self.siteInfoButton];
 
     self.addressField = [[NSTextField alloc] initWithFrame:NSZeroRect];
     self.addressField.translatesAutoresizingMaskIntoConstraints = NO;
@@ -262,7 +362,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     self.askButton = [[TBPillButton alloc] initWithFrame:NSZeroRect];
     self.askButton.translatesAutoresizingMaskIntoConstraints = NO;
-    self.askButton.pillStyle = TBPillStyleAccent;
+    self.askButton.pillStyle = TBPillStyleSecondary;
     self.askButton.title = @"Ask";
     self.askButton.toolTip = @"Open assistant";
     self.askButton.target = self;
@@ -274,6 +374,24 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                                 tooltip:@"Settings"
                                                  action:@selector(openSettings:)];
     [toolbar addSubview:self.settingsButton];
+
+    self.bookmarkButton = [self toolbarButtonWithSymbol:@"star"
+                                               fallback:@"*"
+                                                tooltip:@"Bookmark this page"
+                                                 action:@selector(toggleBookmarkCurrentPage:)];
+    [toolbar addSubview:self.bookmarkButton];
+
+    self.bookmarksButton = [self toolbarButtonWithSymbol:@"book.closed"
+                                                fallback:@"B"
+                                                 tooltip:@"Bookmarks"
+                                                  action:@selector(showBookmarksPopover:)];
+    [toolbar addSubview:self.bookmarksButton];
+
+    self.downloadsButton = [self toolbarButtonWithSymbol:@"arrow.down.circle"
+                                                fallback:@"D"
+                                                 tooltip:@"Downloads"
+                                                  action:@selector(showDownloadsPopover:)];
+    [toolbar addSubview:self.downloadsButton];
 
     self.progressBar = [[TBProgressBar alloc] initWithFrame:NSZeroRect];
     self.progressBar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -299,6 +417,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.webContainer.layer.backgroundColor = TBBg().CGColor;
     [contentArea addSubview:self.webContainer];
     [self buildAssistantOverlay];
+    [self buildFindBar];
+    [self buildTabSwitcherOverlay];
+    [self buildAddressSuggestionsOverlayInView:root];
 
     NSView *tabHeader = [[NSView alloc] initWithFrame:NSZeroRect];
     tabHeader.translatesAutoresizingMaskIntoConstraints = NO;
@@ -364,7 +485,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     for (NSView *view in @[ self.sidebarToggleButton, self.backButton, self.forwardButton,
                            self.addressContainer, self.reloadButton, self.statusDot, self.plusButton,
-                           self.askButton, self.settingsButton, self.progressBar ]) {
+                           self.askButton, self.bookmarkButton, self.bookmarksButton, self.downloadsButton,
+                           self.settingsButton, self.progressBar ]) {
         [toolbar addSubview:view];
     }
 
@@ -407,22 +529,31 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.addressContainer.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
         [self.addressContainer.heightAnchor constraintEqualToConstant:32.0],
 
-        [addressIcon.leadingAnchor constraintEqualToAnchor:self.addressContainer.leadingAnchor constant:12.0],
-        [addressIcon.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
-        [addressIcon.widthAnchor constraintEqualToConstant:14.0],
-        [addressIcon.heightAnchor constraintEqualToConstant:14.0],
+        [self.siteInfoButton.leadingAnchor constraintEqualToAnchor:self.addressContainer.leadingAnchor constant:8.0],
+        [self.siteInfoButton.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
+        [self.siteInfoButton.widthAnchor constraintEqualToConstant:24.0],
+        [self.siteInfoButton.heightAnchor constraintEqualToConstant:24.0],
 
-        [self.addressField.leadingAnchor constraintEqualToAnchor:addressIcon.trailingAnchor constant:8.0],
+        [self.addressField.leadingAnchor constraintEqualToAnchor:self.siteInfoButton.trailingAnchor constant:6.0],
         [self.addressField.trailingAnchor constraintEqualToAnchor:self.addressContainer.trailingAnchor constant:-12.0],
         [self.addressField.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
 
         [self.settingsButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-14.0],
         [self.settingsButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
 
-        [self.askButton.trailingAnchor constraintEqualToAnchor:self.settingsButton.leadingAnchor constant:-8.0],
+        [self.downloadsButton.trailingAnchor constraintEqualToAnchor:self.settingsButton.leadingAnchor constant:-8.0],
+        [self.downloadsButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+
+        [self.bookmarksButton.trailingAnchor constraintEqualToAnchor:self.downloadsButton.leadingAnchor constant:-8.0],
+        [self.bookmarksButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+
+        [self.bookmarkButton.trailingAnchor constraintEqualToAnchor:self.bookmarksButton.leadingAnchor constant:-8.0],
+        [self.bookmarkButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+
+        [self.askButton.trailingAnchor constraintEqualToAnchor:self.bookmarkButton.leadingAnchor constant:-8.0],
         [self.askButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
-        [self.askButton.widthAnchor constraintEqualToConstant:56.0],
-        [self.askButton.heightAnchor constraintEqualToConstant:30.0],
+        [self.askButton.widthAnchor constraintEqualToConstant:44.0],
+        [self.askButton.heightAnchor constraintEqualToConstant:28.0],
 
         [self.plusButton.trailingAnchor constraintEqualToAnchor:self.askButton.leadingAnchor constant:-6.0],
         [self.plusButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
@@ -501,6 +632,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self positionTrafficLights];
 
     [self.window makeFirstResponder:self.addressField];
+    [self installTabSwitcherEventMonitor];
 }
 
 - (void)positionTrafficLights {
@@ -521,6 +653,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)windowDidResize:(NSNotification *)notification {
     (void)notification;
     [self positionTrafficLights];
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
 }
 
 - (NSView *)hairlineView {
@@ -570,7 +703,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     paragraph.alignment = NSTextAlignmentLeft;
     button.attributedTitle = [[NSAttributedString alloc] initWithString:[@"   " stringByAppendingString:title]
                                                              attributes:@{
-        NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium],
+        NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular],
         NSForegroundColorAttributeName: TBText(),
         NSParagraphStyleAttributeName: paragraph
     }];
@@ -589,6 +722,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if ([text isEqualToString:@"Ready"]) {
         dotColor = TBOk();
     } else if ([text isEqualToString:@"Loading"]) {
+        dotColor = TBAccent();
+    } else if ([text hasPrefix:@"Zoom"] ||
+               [text hasPrefix:@"Bookmark"] ||
+               [text hasPrefix:@"Download"] ||
+               [text hasPrefix:@"Clearing"] ||
+               [text hasPrefix:@"Website data"] ||
+               [text hasPrefix:@"Site permission"] ||
+               [text hasPrefix:@"Clustering"] ||
+               [text hasPrefix:@"History clusters"]) {
         dotColor = TBAccent();
     } else if (text.length > 0) {
         dotColor = TBError();
@@ -612,8 +754,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     if (@available(macOS 11.0, *)) {
         NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tooltip];
-        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:15.0
-                                                                                             weight:NSFontWeightMedium];
+        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:14.0
+                                                                                             weight:NSFontWeightRegular];
         image = [image imageWithSymbolConfiguration:config] ?: image;
         image.template = YES;
         button.image = image;
@@ -623,13 +765,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (!button.image) {
         button.imagePosition = NSNoImage;
         button.attributedTitle = [[NSAttributedString alloc] initWithString:fallback attributes:@{
-            NSFontAttributeName: [NSFont systemFontOfSize:14.0 weight:NSFontWeightSemibold],
+            NSFontAttributeName: [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium],
             NSForegroundColorAttributeName: TBMuted()
         }];
     }
 
-    [button.widthAnchor constraintEqualToConstant:32.0].active = YES;
-    [button.heightAnchor constraintEqualToConstant:30.0].active = YES;
+    [button.widthAnchor constraintEqualToConstant:30.0].active = YES;
+    [button.heightAnchor constraintEqualToConstant:28.0].active = YES;
     return button;
 }
 
@@ -819,8 +961,820 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     ]];
 }
 
+#pragma mark - Find in page
+
+- (void)buildFindBar {
+    self.findBar = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    self.findBar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.findBar.material = NSVisualEffectMaterialHUDWindow;
+    self.findBar.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    self.findBar.state = NSVisualEffectStateActive;
+    self.findBar.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.findBar.hidden = YES;
+    self.findBar.wantsLayer = YES;
+    self.findBar.layer.cornerRadius = 12.0;
+    self.findBar.layer.masksToBounds = YES;
+    self.findBar.layer.borderWidth = 1.0;
+    self.findBar.layer.borderColor = TBBorder().CGColor;
+    self.findBar.layer.backgroundColor = TBSurface().CGColor;
+    self.findBar.layer.zPosition = 180.0;
+    [self.webContainer addSubview:self.findBar];
+
+    self.findField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    self.findField.translatesAutoresizingMaskIntoConstraints = NO;
+    self.findField.bezeled = NO;
+    self.findField.bordered = NO;
+    self.findField.drawsBackground = NO;
+    self.findField.focusRingType = NSFocusRingTypeNone;
+    self.findField.usesSingleLineMode = YES;
+    self.findField.cell.usesSingleLineMode = YES;
+    self.findField.cell.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self.findField.cell setScrollable:YES];
+    self.findField.textColor = TBText();
+    self.findField.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular];
+    self.findField.placeholderAttributedString =
+        [[NSAttributedString alloc] initWithString:@"Find in page"
+                                        attributes:@{ NSForegroundColorAttributeName: TBFaint(),
+                                                      NSFontAttributeName: [NSFont systemFontOfSize:13.0] }];
+    self.findField.delegate = self;
+    self.findField.target = self;
+    self.findField.action = @selector(findNext:);
+    [self.findBar addSubview:self.findField];
+
+    self.findStatusLabel = [NSTextField labelWithString:@""];
+    self.findStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.findStatusLabel.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium];
+    self.findStatusLabel.textColor = TBFaint();
+    self.findStatusLabel.alignment = NSTextAlignmentRight;
+    [self.findBar addSubview:self.findStatusLabel];
+
+    self.findPreviousButton = [self sidebarButtonWithSymbol:@"chevron.up"
+                                                   fallback:@"^"
+                                                    tooltip:@"Previous match"
+                                                     action:@selector(findPrevious:)];
+    self.findNextButton = [self sidebarButtonWithSymbol:@"chevron.down"
+                                               fallback:@"v"
+                                                tooltip:@"Next match"
+                                                 action:@selector(findNext:)];
+    self.findCloseButton = [self sidebarButtonWithSymbol:@"xmark"
+                                                fallback:@"x"
+                                                 tooltip:@"Close find"
+                                                  action:@selector(closeFindBar:)];
+    [self.findBar addSubview:self.findPreviousButton];
+    [self.findBar addSubview:self.findNextButton];
+    [self.findBar addSubview:self.findCloseButton];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.findBar.topAnchor constraintEqualToAnchor:self.webContainer.topAnchor constant:14.0],
+        [self.findBar.trailingAnchor constraintEqualToAnchor:self.webContainer.trailingAnchor constant:-18.0],
+        [self.findBar.widthAnchor constraintEqualToConstant:430.0],
+        [self.findBar.heightAnchor constraintEqualToConstant:42.0],
+
+        [self.findField.leadingAnchor constraintEqualToAnchor:self.findBar.leadingAnchor constant:14.0],
+        [self.findField.centerYAnchor constraintEqualToAnchor:self.findBar.centerYAnchor],
+
+        [self.findStatusLabel.leadingAnchor constraintEqualToAnchor:self.findField.trailingAnchor constant:8.0],
+        [self.findStatusLabel.centerYAnchor constraintEqualToAnchor:self.findBar.centerYAnchor],
+        [self.findStatusLabel.widthAnchor constraintEqualToConstant:72.0],
+
+        [self.findPreviousButton.leadingAnchor constraintEqualToAnchor:self.findStatusLabel.trailingAnchor constant:8.0],
+        [self.findPreviousButton.centerYAnchor constraintEqualToAnchor:self.findBar.centerYAnchor],
+
+        [self.findNextButton.leadingAnchor constraintEqualToAnchor:self.findPreviousButton.trailingAnchor constant:4.0],
+        [self.findNextButton.centerYAnchor constraintEqualToAnchor:self.findBar.centerYAnchor],
+
+        [self.findCloseButton.leadingAnchor constraintEqualToAnchor:self.findNextButton.trailingAnchor constant:6.0],
+        [self.findCloseButton.trailingAnchor constraintEqualToAnchor:self.findBar.trailingAnchor constant:-8.0],
+        [self.findCloseButton.centerYAnchor constraintEqualToAnchor:self.findBar.centerYAnchor]
+    ]];
+}
+
+- (void)showFindBar:(id)sender {
+    (void)sender;
+    if (!self.webView) return;
+    [self.webContainer addSubview:self.findBar positioned:NSWindowAbove relativeTo:self.webView];
+    self.findBar.hidden = NO;
+    self.findBar.alphaValue = 1.0;
+    [self.window makeFirstResponder:self.findField];
+    [self.findField selectText:nil];
+    if (self.findField.stringValue.length > 0) [self runFindBackwards:NO];
+}
+
+- (void)closeFindBar:(id)sender {
+    (void)sender;
+    self.findBar.hidden = YES;
+    self.findStatusLabel.stringValue = @"";
+    [self.window makeFirstResponder:self.webView];
+}
+
+- (void)findNext:(id)sender {
+    (void)sender;
+    if (self.findBar.hidden) [self showFindBar:nil];
+    [self runFindBackwards:NO];
+}
+
+- (void)findPrevious:(id)sender {
+    (void)sender;
+    if (self.findBar.hidden) [self showFindBar:nil];
+    [self runFindBackwards:YES];
+}
+
+- (void)runFindBackwards:(BOOL)backwards {
+    NSString *query = [self.findField.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (query.length == 0 || !self.webView) {
+        self.findStatusLabel.stringValue = @"";
+        return;
+    }
+
+    if (@available(macOS 11.0, *)) {
+        WKFindConfiguration *configuration = [[WKFindConfiguration alloc] init];
+        configuration.backwards = backwards;
+        configuration.wraps = YES;
+        __weak BrowserAppDelegate *weakSelf = self;
+        [self.webView findString:query withConfiguration:configuration completionHandler:^(WKFindResult *result) {
+            BrowserAppDelegate *strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.findStatusLabel.stringValue = result.matchFound ? @"Match" : @"No match";
+            strongSelf.findStatusLabel.textColor = result.matchFound ? TBFaint() : TBError();
+        }];
+    } else {
+        NSString *literal = [self javaScriptStringLiteralForString:query];
+        NSString *script = [NSString stringWithFormat:@"window.find(%@, false, %@, true, false, false, false)",
+                            literal, backwards ? @"true" : @"false"];
+        [self.webView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+            (void)error;
+            BOOL found = [result respondsToSelector:@selector(boolValue)] ? [result boolValue] : NO;
+            self.findStatusLabel.stringValue = found ? @"Match" : @"No match";
+            self.findStatusLabel.textColor = found ? TBFaint() : TBError();
+        }];
+    }
+}
+
+#pragma mark - Page info
+
+- (NSURL *)currentDisplayURL {
+    NSURL *url = self.webView.URL;
+    if (url) return url;
+
+    NSString *urlString = [self activeTab].urlString ?: @"";
+    return urlString.length > 0 ? [NSURL URLWithString:urlString] : nil;
+}
+
+- (NSString *)siteInfoSymbolForURL:(NSURL *)url {
+    NSString *scheme = url.scheme.lowercaseString ?: @"";
+    NSString *urlString = url.absoluteString ?: @"";
+    if (urlString.length == 0) return @"magnifyingglass";
+    if ([self isHomeURLString:urlString]) return @"house";
+    if ([self isSettingsURLString:urlString]) return @"gearshape";
+    if ([self isOnboardingURLString:urlString]) return @"sparkles";
+    if ([scheme isEqualToString:@"https"]) return @"lock.fill";
+    if ([scheme isEqualToString:@"http"]) return @"exclamationmark.triangle.fill";
+    if ([scheme isEqualToString:@"file"]) return @"doc";
+    return @"globe";
+}
+
+- (NSString *)connectionSummaryForURL:(NSURL *)url {
+    NSString *scheme = url.scheme.lowercaseString ?: @"";
+    NSString *urlString = url.absoluteString ?: @"";
+    NSString *privacyNote = [self activeTab].privateBrowsing
+        ? @"\n\nPrivate tab: TrailBrowser will not save this tab to history or session restore, and WebKit uses temporary website storage."
+        : @"";
+    NSString *permissionsNote = [self sitePermissionSummaryForURL:url];
+    if (permissionsNote.length > 0) {
+        permissionsNote = [@"\n\n" stringByAppendingString:permissionsNote];
+    }
+    if ([self isHomeURLString:urlString] ||
+        [self isSettingsURLString:urlString] ||
+        [self isOnboardingURLString:urlString]) {
+        return [@"TrailBrowser internal page. No network connection is used." stringByAppendingString:privacyNote];
+    }
+    if ([scheme isEqualToString:@"https"]) {
+        NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithObject:@"Secure HTTPS connection."];
+        if (@available(macOS 10.12, *)) {
+            SecTrustRef trust = self.webView.serverTrust;
+            if (trust) {
+                CFErrorRef trustError = NULL;
+                BOOL trusted = SecTrustEvaluateWithError(trust, &trustError);
+                if (trustError) CFRelease(trustError);
+                [parts addObject:trusted ? @"Certificate is trusted by macOS." : @"Certificate could not be fully verified."];
+                if (@available(macOS 12.0, *)) {
+                    CFArrayRef chain = SecTrustCopyCertificateChain(trust);
+                    SecCertificateRef leaf = chain && CFArrayGetCount(chain) > 0
+                        ? (SecCertificateRef)CFArrayGetValueAtIndex(chain, 0)
+                        : NULL;
+                    if (leaf) {
+                        NSString *summary = CFBridgingRelease(SecCertificateCopySubjectSummary(leaf));
+                        if (summary.length > 0) [parts addObject:[NSString stringWithFormat:@"Certificate: %@", summary]];
+                    }
+                    if (chain) CFRelease(chain);
+                }
+            }
+        }
+        return [[[parts componentsJoinedByString:@"\n"] stringByAppendingString:permissionsNote] stringByAppendingString:privacyNote];
+    }
+    if ([scheme isEqualToString:@"http"]) {
+        return [[@"Not secure. This page is loaded over HTTP, so traffic is not encrypted." stringByAppendingString:permissionsNote] stringByAppendingString:privacyNote];
+    }
+    if ([scheme isEqualToString:@"file"]) {
+        return [@"Local file opened from this Mac." stringByAppendingString:privacyNote];
+    }
+    if (urlString.length > 0) {
+        return [@"Connection details are not available for this URL scheme." stringByAppendingString:privacyNote];
+    }
+    return [@"No page is loaded." stringByAppendingString:privacyNote];
+}
+
+- (void)updateSiteInfoButton {
+    NSURL *url = [self currentDisplayURL];
+    NSString *symbol = [self activeTab].privateBrowsing ? @"eye.slash" : [self siteInfoSymbolForURL:url];
+    NSString *summary = [self connectionSummaryForURL:url];
+    self.siteInfoButton.toolTip = summary.length ? summary : @"Page info";
+    if (@available(macOS 11.0, *)) {
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:@"Page info"];
+        image.template = YES;
+        self.siteInfoButton.image = image;
+    }
+    if (@available(macOS 10.14, *)) {
+        NSString *scheme = url.scheme.lowercaseString ?: @"";
+        if ([self activeTab].privateBrowsing) {
+            self.siteInfoButton.contentTintColor = TBAccent();
+        } else if ([scheme isEqualToString:@"https"]) {
+            self.siteInfoButton.contentTintColor = TBOk();
+        } else if ([scheme isEqualToString:@"http"]) {
+            self.siteInfoButton.contentTintColor = TBError();
+        } else {
+            self.siteInfoButton.contentTintColor = TBFaint();
+        }
+    }
+}
+
+- (void)showPageInfo:(id)sender {
+    (void)sender;
+    NSURL *url = [self currentDisplayURL];
+    NSString *urlString = url.absoluteString ?: self.addressField.stringValue ?: @"";
+    BrowserTab *tab = [self activeTab];
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleInformational;
+    alert.messageText = tab.title.length ? tab.title : @"Page Info";
+    alert.informativeText = [NSString stringWithFormat:@"%@\n\n%@",
+                             urlString.length ? urlString : @"No URL",
+                             [self connectionSummaryForURL:url]];
+    [alert addButtonWithTitle:@"OK"];
+    [alert beginSheetModalForWindow:self.window completionHandler:nil];
+}
+
+#pragma mark - Address suggestions
+
+- (void)buildAddressSuggestionsOverlayInView:(NSView *)root {
+    self.addressSuggestionsPanel = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    self.addressSuggestionsPanel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.addressSuggestionsPanel.material = NSVisualEffectMaterialHUDWindow;
+    self.addressSuggestionsPanel.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    self.addressSuggestionsPanel.state = NSVisualEffectStateActive;
+    self.addressSuggestionsPanel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.addressSuggestionsPanel.hidden = YES;
+    self.addressSuggestionsPanel.alphaValue = 0.0;
+    self.addressSuggestionsPanel.wantsLayer = YES;
+    self.addressSuggestionsPanel.layer.cornerRadius = 10.0;
+    self.addressSuggestionsPanel.layer.masksToBounds = YES;
+    self.addressSuggestionsPanel.layer.borderWidth = 1.0;
+    self.addressSuggestionsPanel.layer.borderColor = TBBorder().CGColor;
+    self.addressSuggestionsPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.96].CGColor;
+    self.addressSuggestionsPanel.layer.zPosition = 250.0;
+    [root addSubview:self.addressSuggestionsPanel];
+
+    self.addressSuggestionsStack = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    self.addressSuggestionsStack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.addressSuggestionsStack.orientation = NSUserInterfaceLayoutOrientationVertical;
+    self.addressSuggestionsStack.alignment = NSLayoutAttributeLeading;
+    self.addressSuggestionsStack.distribution = NSStackViewDistributionFill;
+    self.addressSuggestionsStack.spacing = 2.0;
+    [self.addressSuggestionsPanel addSubview:self.addressSuggestionsStack];
+
+    self.addressSuggestionsHeightConstraint = [self.addressSuggestionsPanel.heightAnchor constraintEqualToConstant:0.0];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.addressSuggestionsPanel.topAnchor constraintEqualToAnchor:self.toolbar.bottomAnchor constant:6.0],
+        [self.addressSuggestionsPanel.leadingAnchor constraintEqualToAnchor:self.addressContainer.leadingAnchor],
+        [self.addressSuggestionsPanel.widthAnchor constraintEqualToAnchor:self.addressContainer.widthAnchor],
+        self.addressSuggestionsHeightConstraint,
+
+        [self.addressSuggestionsStack.topAnchor constraintEqualToAnchor:self.addressSuggestionsPanel.topAnchor constant:6.0],
+        [self.addressSuggestionsStack.leadingAnchor constraintEqualToAnchor:self.addressSuggestionsPanel.leadingAnchor constant:6.0],
+        [self.addressSuggestionsStack.trailingAnchor constraintEqualToAnchor:self.addressSuggestionsPanel.trailingAnchor constant:-6.0],
+        [self.addressSuggestionsStack.bottomAnchor constraintEqualToAnchor:self.addressSuggestionsPanel.bottomAnchor constant:-6.0]
+    ]];
+}
+
+- (void)showAddressSuggestionsPanel {
+    if (!self.addressSuggestionsPanel.hidden) return;
+    self.addressSuggestionsPanel.hidden = NO;
+    self.addressSuggestionsPanel.alphaValue = 0.0;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.08;
+        self.addressSuggestionsPanel.animator.alphaValue = 1.0;
+    } completionHandler:nil];
+}
+
+- (void)hideAddressSuggestionsPanel {
+    if (self.addressSuggestionsPanel.hidden) return;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.08;
+        self.addressSuggestionsPanel.animator.alphaValue = 0.0;
+    } completionHandler:^{
+        self.addressSuggestionsPanel.hidden = YES;
+        self.addressSuggestionIndex = -1;
+    }];
+}
+
+- (void)updateAddressSuggestions {
+    NSString *input = [self.addressField.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (input.length == 0 || ![self isAddressFieldBeingEdited]) {
+        self.addressSuggestions = @[];
+        [self renderAddressSuggestions];
+        [self hideAddressSuggestionsPanel];
+        return;
+    }
+
+    self.addressSuggestions = [self suggestionsForAddressInput:input limit:6];
+    self.addressSuggestionIndex = self.addressSuggestions.count > 0 ? 0 : -1;
+    [self renderAddressSuggestions];
+    if (self.addressSuggestions.count > 0) {
+        [self showAddressSuggestionsPanel];
+    } else {
+        [self hideAddressSuggestionsPanel];
+    }
+}
+
+- (NSArray<NSDictionary<NSString *, NSString *> *> *)suggestionsForAddressInput:(NSString *)input limit:(NSUInteger)limit {
+    NSMutableArray<NSDictionary<NSString *, NSString *> *> *suggestions = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    NSString *needle = input.lowercaseString;
+
+    NSURL *searchURL = [self searchURLForQuery:input];
+    [suggestions addObject:@{ @"kind": @"search",
+                              @"title": [NSString stringWithFormat:@"Search Google for \"%@\"", input],
+                              @"subtitle": @"Search",
+                              @"input": input,
+                              @"url": searchURL.absoluteString ?: @"" }];
+    [seen addObject:[@"search:" stringByAppendingString:needle]];
+
+    NSArray<NSDictionary<NSString *, id> *> *searches = [self JSONLinesAtPath:[self searchHistoryFilePath] newestFirst:YES];
+    for (NSDictionary<NSString *, id> *entry in searches) {
+        if (suggestions.count >= limit) break;
+        NSString *query = [entry[@"query"] isKindOfClass:NSString.class] ? entry[@"query"] : @"";
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (query.length == 0) continue;
+        if (![query.lowercaseString containsString:needle]) continue;
+        NSString *key = [@"search:" stringByAppendingString:query.lowercaseString];
+        if ([seen containsObject:key]) continue;
+        [seen addObject:key];
+        [suggestions addObject:@{ @"kind": @"search",
+                                  @"title": query,
+                                  @"subtitle": @"Previous search",
+                                  @"input": query,
+                                  @"url": url.length ? url : ([self searchURLForQuery:query].absoluteString ?: @"") }];
+    }
+
+    NSArray<NSDictionary<NSString *, id> *> *history = [self JSONLinesAtPath:[self historyFilePath] newestFirst:YES];
+    for (NSDictionary<NSString *, id> *entry in history) {
+        if (suggestions.count >= limit) break;
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+        NSString *host = [entry[@"host"] isKindOfClass:NSString.class] ? entry[@"host"] : @"";
+        NSString *haystack = [[@[ title ?: @"", url ?: @"", host ?: @"" ] componentsJoinedByString:@" "] lowercaseString];
+        if (url.length == 0 || ![haystack containsString:needle]) continue;
+        NSString *key = [@"url:" stringByAppendingString:url.lowercaseString];
+        if ([seen containsObject:key]) continue;
+        [seen addObject:key];
+        [suggestions addObject:@{ @"kind": @"url",
+                                  @"title": title.length ? title : (host.length ? host : url),
+                                  @"subtitle": url,
+                                  @"input": url,
+                                  @"url": url }];
+    }
+
+    return suggestions;
+}
+
+- (void)renderAddressSuggestions {
+    for (NSView *view in self.addressSuggestionsStack.arrangedSubviews.copy) {
+        [self.addressSuggestionsStack removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+
+    NSUInteger count = self.addressSuggestions.count;
+    self.addressSuggestionsHeightConstraint.constant = count ? (CGFloat)(count * 44 + 12) : 0.0;
+
+    for (NSUInteger i = 0; i < count; i++) {
+        NSView *row = [self addressSuggestionRowAtIndex:(NSInteger)i
+                                             suggestion:self.addressSuggestions[i]
+                                               selected:((NSInteger)i == self.addressSuggestionIndex)];
+        [self.addressSuggestionsStack addArrangedSubview:row];
+    }
+}
+
+- (NSView *)addressSuggestionRowAtIndex:(NSInteger)index
+                             suggestion:(NSDictionary<NSString *, NSString *> *)suggestion
+                               selected:(BOOL)selected {
+    NSButton *row = [[NSButton alloc] initWithFrame:NSZeroRect];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    row.bordered = NO;
+    row.title = @"";
+    row.focusRingType = NSFocusRingTypeNone;
+    row.target = self;
+    row.action = @selector(chooseAddressSuggestion:);
+    row.tag = index;
+    row.wantsLayer = YES;
+    row.layer.cornerRadius = 7.0;
+    row.layer.backgroundColor = selected ? [TBElevated() colorWithAlphaComponent:0.96].CGColor
+                                         : NSColor.clearColor.CGColor;
+
+    NSImageView *icon = [[NSImageView alloc] initWithFrame:NSZeroRect];
+    icon.translatesAutoresizingMaskIntoConstraints = NO;
+    icon.imageScaling = NSImageScaleProportionallyDown;
+    if (@available(macOS 11.0, *)) {
+        NSString *symbol = [suggestion[@"kind"] isEqualToString:@"search"] ? @"magnifyingglass" : @"clock.arrow.circlepath";
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil];
+        image.template = YES;
+        icon.image = image;
+    }
+    if (@available(macOS 10.14, *)) icon.contentTintColor = selected ? TBAccent() : TBMuted();
+    [row addSubview:icon];
+
+    NSTextField *title = [NSTextField labelWithString:suggestion[@"title"] ?: @""];
+    title.translatesAutoresizingMaskIntoConstraints = NO;
+    title.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
+    title.textColor = selected ? TBText() : TBMuted();
+    title.lineBreakMode = NSLineBreakByTruncatingTail;
+    title.maximumNumberOfLines = 1;
+    [row addSubview:title];
+
+    NSTextField *subtitle = [NSTextField labelWithString:suggestion[@"subtitle"] ?: @""];
+    subtitle.translatesAutoresizingMaskIntoConstraints = NO;
+    subtitle.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightRegular];
+    subtitle.textColor = TBFaint();
+    subtitle.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    subtitle.maximumNumberOfLines = 1;
+    [row addSubview:subtitle];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [row.widthAnchor constraintEqualToAnchor:self.addressSuggestionsStack.widthAnchor],
+        [row.heightAnchor constraintEqualToConstant:42.0],
+
+        [icon.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:10.0],
+        [icon.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [icon.widthAnchor constraintEqualToConstant:16.0],
+        [icon.heightAnchor constraintEqualToConstant:16.0],
+
+        [title.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:10.0],
+        [title.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-10.0],
+        [title.topAnchor constraintEqualToAnchor:row.topAnchor constant:6.0],
+
+        [subtitle.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+        [subtitle.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
+        [subtitle.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:1.0]
+    ]];
+
+    return row;
+}
+
+- (void)chooseAddressSuggestion:(id)sender {
+    NSInteger index = [sender tag];
+    [self acceptAddressSuggestionAtIndex:index];
+}
+
+- (void)moveAddressSuggestionSelectionBy:(NSInteger)delta {
+    if (self.addressSuggestions.count == 0) return;
+    NSInteger count = (NSInteger)self.addressSuggestions.count;
+    self.addressSuggestionIndex = (self.addressSuggestionIndex + delta + count) % count;
+    [self renderAddressSuggestions];
+}
+
+- (void)acceptAddressSuggestionAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.addressSuggestions.count) return;
+    NSDictionary<NSString *, NSString *> *suggestion = self.addressSuggestions[(NSUInteger)index];
+    NSString *input = suggestion[@"input"] ?: suggestion[@"url"] ?: @"";
+    if (input.length == 0) return;
+    self.addressField.stringValue = input;
+    [self hideAddressSuggestionsPanel];
+    self.userEditingAddress = NO;
+    [self loadURLString:input];
+}
+
+#pragma mark - Tab switcher
+
+- (void)buildTabSwitcherOverlay {
+    self.tabSwitcherPanel = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    self.tabSwitcherPanel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tabSwitcherPanel.material = NSVisualEffectMaterialHUDWindow;
+    self.tabSwitcherPanel.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    self.tabSwitcherPanel.state = NSVisualEffectStateActive;
+    self.tabSwitcherPanel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.tabSwitcherPanel.hidden = YES;
+    self.tabSwitcherPanel.alphaValue = 0.0;
+    self.tabSwitcherPanel.wantsLayer = YES;
+    self.tabSwitcherPanel.layer.cornerRadius = 18.0;
+    self.tabSwitcherPanel.layer.masksToBounds = YES;
+    self.tabSwitcherPanel.layer.borderWidth = 1.0;
+    self.tabSwitcherPanel.layer.borderColor = TBBorder().CGColor;
+    self.tabSwitcherPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.72].CGColor;
+    self.tabSwitcherPanel.layer.zPosition = 200.0;
+    [self.webContainer addSubview:self.tabSwitcherPanel];
+
+    self.tabSwitcherStack = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    self.tabSwitcherStack.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tabSwitcherStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    self.tabSwitcherStack.alignment = NSLayoutAttributeCenterY;
+    self.tabSwitcherStack.distribution = NSStackViewDistributionGravityAreas;
+    self.tabSwitcherStack.spacing = 6.0;
+    [self.tabSwitcherPanel addSubview:self.tabSwitcherStack];
+
+    self.tabSwitcherWidthConstraint = [self.tabSwitcherPanel.widthAnchor constraintEqualToConstant:220.0];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.tabSwitcherPanel.centerXAnchor constraintEqualToAnchor:self.webContainer.centerXAnchor],
+        [self.tabSwitcherPanel.centerYAnchor constraintEqualToAnchor:self.webContainer.centerYAnchor constant:-24.0],
+        self.tabSwitcherWidthConstraint,
+        [self.tabSwitcherPanel.heightAnchor constraintEqualToConstant:92.0],
+
+        [self.tabSwitcherStack.leadingAnchor constraintEqualToAnchor:self.tabSwitcherPanel.leadingAnchor constant:16.0],
+        [self.tabSwitcherStack.trailingAnchor constraintEqualToAnchor:self.tabSwitcherPanel.trailingAnchor constant:-16.0],
+        [self.tabSwitcherStack.topAnchor constraintEqualToAnchor:self.tabSwitcherPanel.topAnchor constant:10.0],
+        [self.tabSwitcherStack.bottomAnchor constraintEqualToAnchor:self.tabSwitcherPanel.bottomAnchor constant:-8.0]
+    ]];
+}
+
+- (void)installTabSwitcherEventMonitor {
+    if (self.tabSwitcherEventMonitor) return;
+
+    __weak BrowserAppDelegate *weakSelf = self;
+    self.tabSwitcherEventMonitor =
+        [NSEvent addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown | NSEventMaskFlagsChanged)
+                                              handler:^NSEvent *(NSEvent *event) {
+        BrowserAppDelegate *strongSelf = weakSelf;
+        if (!strongSelf) return event;
+        return [strongSelf handleTabSwitcherEvent:event];
+    }];
+}
+
+- (NSEvent *)handleTabSwitcherEvent:(NSEvent *)event {
+    if (event.window && event.window != self.window) return event;
+
+    if (event.type == NSEventTypeKeyDown) {
+        if ([self isCommandOptionTabEvent:event]) {
+            BOOL backward = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+            [self beginOrAdvanceTabSwitcherBackward:backward];
+            return nil;
+        }
+
+        if (self.tabSwitcherVisible) {
+            if (event.keyCode == kEscapeKeyCode) {
+                [self cancelTabSwitcher];
+                return nil;
+            }
+            if (event.keyCode == kReturnKeyCode) {
+                [self commitTabSwitcher];
+                return nil;
+            }
+            if (event.keyCode == kLeftArrowKeyCode || event.keyCode == kRightArrowKeyCode) {
+                [self advanceTabSwitcherBy:(event.keyCode == kLeftArrowKeyCode) ? -1 : 1];
+                return nil;
+            }
+        }
+        return event;
+    }
+
+    if (event.type == NSEventTypeFlagsChanged && self.tabSwitcherVisible) {
+        NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        BOOL stillHoldingSwitcher = (flags & NSEventModifierFlagCommand) &&
+                                    (flags & NSEventModifierFlagOption);
+        if (!stillHoldingSwitcher) {
+            [self commitTabSwitcher];
+        }
+        return nil;
+    }
+
+    return event;
+}
+
+- (BOOL)isCommandOptionTabEvent:(NSEvent *)event {
+    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    return event.keyCode == kTabKeyCode &&
+           (flags & NSEventModifierFlagCommand) &&
+           (flags & NSEventModifierFlagOption);
+}
+
+- (void)showTabSwitcherFromMenu:(id)sender {
+    (void)sender;
+    [self beginOrAdvanceTabSwitcherBackward:NO];
+    [self commitTabSwitcher];
+}
+
+- (void)beginOrAdvanceTabSwitcherBackward:(BOOL)backward {
+    if (self.tabs.count <= 1) return;
+
+    if (!self.tabSwitcherVisible) {
+        self.tabSwitcherIndex = self.activeTabIndex >= 0 ? self.activeTabIndex : 0;
+        [self showTabSwitcher];
+    }
+
+    [self advanceTabSwitcherBy:backward ? -1 : 1];
+}
+
+- (void)advanceTabSwitcherBy:(NSInteger)delta {
+    if (self.tabs.count == 0) return;
+
+    NSInteger count = (NSInteger)self.tabs.count;
+    self.tabSwitcherIndex = (self.tabSwitcherIndex + delta + count) % count;
+    [self refreshTabSwitcher];
+}
+
+- (void)showTabSwitcher {
+    self.tabSwitcherVisible = YES;
+    self.tabSwitcherPanel.hidden = NO;
+    self.tabSwitcherPanel.alphaValue = 0.0;
+    self.tabSwitcherPanel.layer.transform = CATransform3DMakeScale(0.98, 0.98, 1.0);
+    [self.webContainer addSubview:self.tabSwitcherPanel positioned:NSWindowAbove relativeTo:nil];
+    [self refreshTabSwitcher];
+
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.12;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        self.tabSwitcherPanel.animator.alphaValue = 1.0;
+        self.tabSwitcherPanel.layer.transform = CATransform3DIdentity;
+    } completionHandler:nil];
+}
+
+- (void)hideTabSwitcher {
+    self.tabSwitcherVisible = NO;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.10;
+        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        self.tabSwitcherPanel.animator.alphaValue = 0.0;
+    } completionHandler:^{
+        if (!self.tabSwitcherVisible) self.tabSwitcherPanel.hidden = YES;
+    }];
+}
+
+- (void)commitTabSwitcher {
+    if (!self.tabSwitcherVisible) return;
+    NSInteger index = self.tabSwitcherIndex;
+    [self hideTabSwitcher];
+    [self selectTabAtIndex:index];
+}
+
+- (void)cancelTabSwitcher {
+    if (!self.tabSwitcherVisible) return;
+    [self hideTabSwitcher];
+}
+
+- (void)chooseTabFromSwitcherItem:(id)sender {
+    NSInteger index = [sender tag];
+    if (index < 0 || index >= (NSInteger)self.tabs.count) return;
+    self.tabSwitcherIndex = index;
+    [self commitTabSwitcher];
+}
+
+- (void)refreshTabSwitcher {
+    if (!self.tabSwitcherPanel) return;
+
+    for (NSView *view in self.tabSwitcherStack.arrangedSubviews.copy) {
+        [self.tabSwitcherStack removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+
+    NSInteger count = (NSInteger)self.tabs.count;
+    if (count == 0) return;
+
+    NSInteger visibleCount = MIN(count, kMaxVisibleSwitcherTabs);
+    NSInteger start = self.tabSwitcherIndex - visibleCount / 2;
+    if (start < 0) start = 0;
+    if (start + visibleCount > count) start = count - visibleCount;
+
+    CGFloat width = 32.0 + visibleCount * 62.0 + MAX(0, visibleCount - 1) * self.tabSwitcherStack.spacing;
+    CGFloat maxWidth = MAX(240.0, NSWidth(self.webContainer.bounds) - 72.0);
+    self.tabSwitcherWidthConstraint.constant = MIN(width, maxWidth);
+
+    for (NSInteger i = 0; i < visibleCount; i++) {
+        NSInteger tabIndex = start + i;
+        NSView *item = [self tabSwitcherItemForIndex:tabIndex selected:(tabIndex == self.tabSwitcherIndex)];
+        [self.tabSwitcherStack addArrangedSubview:item];
+    }
+}
+
+- (NSView *)tabSwitcherItemForIndex:(NSInteger)index selected:(BOOL)selected {
+    BrowserTab *tab = self.tabs[(NSUInteger)index];
+
+    NSButton *item = [[NSButton alloc] initWithFrame:NSZeroRect];
+    item.translatesAutoresizingMaskIntoConstraints = NO;
+    item.bordered = NO;
+    item.title = @"";
+    item.focusRingType = NSFocusRingTypeNone;
+    item.target = self;
+    item.action = @selector(chooseTabFromSwitcherItem:);
+    item.tag = index;
+    item.wantsLayer = YES;
+    item.layer.cornerRadius = 8.0;
+    item.layer.masksToBounds = YES;
+    item.layer.backgroundColor = selected ? [TBElevated() colorWithAlphaComponent:0.96].CGColor
+                                          : NSColor.clearColor.CGColor;
+    item.layer.borderWidth = selected ? 1.0 : 0.0;
+    item.layer.borderColor = selected ? [TBAccent() colorWithAlphaComponent:0.55].CGColor
+                                      : NSColor.clearColor.CGColor;
+
+    NSView *iconWell = [[NSView alloc] initWithFrame:NSZeroRect];
+    iconWell.translatesAutoresizingMaskIntoConstraints = NO;
+    iconWell.wantsLayer = YES;
+    iconWell.layer.cornerRadius = 8.0;
+    iconWell.layer.masksToBounds = YES;
+    iconWell.layer.backgroundColor = selected ? [TBAccent() colorWithAlphaComponent:0.16].CGColor
+                                              : [TBElevated() colorWithAlphaComponent:0.66].CGColor;
+    [item addSubview:iconWell];
+
+    NSImageView *icon = [[NSImageView alloc] initWithFrame:NSZeroRect];
+    icon.translatesAutoresizingMaskIntoConstraints = NO;
+    icon.imageScaling = NSImageScaleProportionallyDown;
+    icon.image = [self switcherIconForTab:tab];
+    icon.alphaValue = tab.webView || selected ? 1.0 : 0.58;
+    if (!tab.favicon) {
+        if (@available(macOS 10.14, *)) {
+            icon.contentTintColor = selected ? TBAccent() : TBMuted();
+        }
+    }
+    [iconWell addSubview:icon];
+
+    NSTextField *label = [NSTextField labelWithString:selected ? [self switcherTitleForTab:tab] : @" "];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.font = [NSFont systemFontOfSize:10.5 weight:NSFontWeightSemibold];
+    label.textColor = selected ? TBText() : NSColor.clearColor;
+    label.alignment = NSTextAlignmentCenter;
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    label.maximumNumberOfLines = 1;
+    [item addSubview:label];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [item.widthAnchor constraintEqualToConstant:62.0],
+        [item.heightAnchor constraintEqualToConstant:72.0],
+
+        [iconWell.topAnchor constraintEqualToAnchor:item.topAnchor constant:5.0],
+        [iconWell.centerXAnchor constraintEqualToAnchor:item.centerXAnchor],
+        [iconWell.widthAnchor constraintEqualToConstant:48.0],
+        [iconWell.heightAnchor constraintEqualToConstant:48.0],
+
+        [icon.centerXAnchor constraintEqualToAnchor:iconWell.centerXAnchor],
+        [icon.centerYAnchor constraintEqualToAnchor:iconWell.centerYAnchor],
+        [icon.widthAnchor constraintEqualToConstant:34.0],
+        [icon.heightAnchor constraintEqualToConstant:34.0],
+
+        [label.leadingAnchor constraintEqualToAnchor:item.leadingAnchor constant:3.0],
+        [label.trailingAnchor constraintEqualToAnchor:item.trailingAnchor constant:-3.0],
+        [label.topAnchor constraintEqualToAnchor:iconWell.bottomAnchor constant:3.0],
+        [label.bottomAnchor constraintLessThanOrEqualToAnchor:item.bottomAnchor constant:-2.0]
+    ]];
+
+    return item;
+}
+
+- (NSImage *)switcherIconForTab:(BrowserTab *)tab {
+    if (tab.favicon) {
+        tab.favicon.template = NO;
+        return tab.favicon;
+    }
+
+    if (@available(macOS 11.0, *)) {
+        NSString *symbol = tab.privateBrowsing ? @"eye.slash" : @"globe";
+        if (tab.privateBrowsing) {
+            symbol = @"eye.slash";
+        } else if ([self isHomeURLString:tab.urlString]) {
+            symbol = @"house";
+        } else if ([self isSettingsURLString:tab.urlString]) {
+            symbol = @"gearshape";
+        } else if ([self isOnboardingURLString:tab.urlString]) {
+            symbol = @"sparkles";
+        }
+
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:@"Tab"];
+        NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:24.0
+                                                                                             weight:NSFontWeightMedium];
+        image = [image imageWithSymbolConfiguration:config] ?: image;
+        image.template = YES;
+        return image;
+    }
+
+    return [NSImage imageNamed:NSImageNameNetwork];
+}
+
+- (NSString *)switcherTitleForTab:(BrowserTab *)tab {
+    NSString *title = tab.title.length ? tab.title : nil;
+    if (title.length == 0 || [title isEqualToString:@"New Tab"]) {
+        title = [self subtitleForTab:tab];
+    }
+    if (title.length == 0) return @"New Tab";
+    return title;
+}
+
 - (WKWebView *)createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration {
-    WKWebViewConfiguration *config = configuration ?: [[WKWebViewConfiguration alloc] init];
+    WKWebViewConfiguration *config = configuration ?: [self defaultWebViewConfiguration];
     [self configureForLowMemory:config];
     WKWebView *webView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:config];
     webView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -828,6 +1782,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     webView.UIDelegate = self;
     webView.allowsBackForwardNavigationGestures = YES;
     webView.hidden = YES;
+    if (@available(macOS 13.3, *)) {
+        webView.inspectable = YES;
+    }
     if (self.assistantResultPanel) {
         [self.webContainer addSubview:webView positioned:NSWindowBelow relativeTo:self.assistantResultPanel];
     } else {
@@ -844,6 +1801,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (self.assistantResultPanel) {
         [self.webContainer addSubview:self.assistantResultPanel positioned:NSWindowAbove relativeTo:webView];
         [self.webContainer addSubview:self.assistantBar positioned:NSWindowAbove relativeTo:self.assistantResultPanel];
+    }
+    if (self.findBar) {
+        [self.webContainer addSubview:self.findBar positioned:NSWindowAbove relativeTo:webView];
+    }
+    if (self.tabSwitcherPanel) {
+        [self.webContainer addSubview:self.tabSwitcherPanel positioned:NSWindowAbove relativeTo:self.findBar ?: webView];
     }
 
     [self addObserversToWebView:webView];
@@ -882,23 +1845,44 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)configureForLowMemory:(WKWebViewConfiguration *)configuration {
-
-    configuration.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
     configuration.suppressesIncrementalRendering = YES;
     configuration.allowsAirPlayForMediaPlayback = NO;
     configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
 }
 
+- (WKWebViewConfiguration *)defaultWebViewConfiguration {
+    WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    configuration.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
+    return configuration;
+}
+
+- (WKWebViewConfiguration *)privateWebViewConfiguration {
+    WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    configuration.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
+    return configuration;
+}
+
 - (BrowserTab *)newTabWithURLString:(NSString *)urlString select:(BOOL)select {
-    return [self newTabWithConfiguration:nil URLString:urlString select:select];
+    return [self newTabWithConfiguration:nil URLString:urlString select:select privateBrowsing:NO];
 }
 
 - (BrowserTab *)newTabWithConfiguration:(WKWebViewConfiguration *)configuration
                               URLString:(NSString *)urlString
                                  select:(BOOL)select {
+    return [self newTabWithConfiguration:configuration
+                               URLString:urlString
+                                  select:select
+                         privateBrowsing:NO];
+}
+
+- (BrowserTab *)newTabWithConfiguration:(WKWebViewConfiguration *)configuration
+                              URLString:(NSString *)urlString
+                                 select:(BOOL)select
+                        privateBrowsing:(BOOL)privateBrowsing {
     BrowserTab *tab = [[BrowserTab alloc] init];
     tab.title = @"New Tab";
     tab.urlString = urlString ?: [self homeURLString];
+    tab.privateBrowsing = privateBrowsing;
     if (configuration) tab.webView = [self createWebViewWithConfiguration:configuration];
     [self.tabs addObject:tab];
     [self.tabTable reloadData];
@@ -907,12 +1891,20 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSInteger index = (NSInteger)self.tabs.count - 1;
     if (select) {
         [self selectTabAtIndex:index];
-    } else if (configuration == nil) {
+    } else if (configuration == nil && !privateBrowsing) {
         [self preloadTab:tab];
         [self enforceLiveTabBudget];
     }
 
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
     return tab;
+}
+
+- (BrowserTab *)newPrivateTabWithURLString:(NSString *)urlString select:(BOOL)select {
+    return [self newTabWithConfiguration:[self privateWebViewConfiguration]
+                               URLString:urlString ?: [self homeURLString]
+                                  select:select
+                         privateBrowsing:YES];
 }
 
 - (BrowserTab *)activeTab {
@@ -929,7 +1921,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (WKWebView *)ensureWebViewForTab:(BrowserTab *)tab {
     if (!tab.webView) {
-        tab.webView = [self createWebViewWithConfiguration:nil];
+        WKWebViewConfiguration *configuration = tab.privateBrowsing ? [self privateWebViewConfiguration] : nil;
+        tab.webView = [self createWebViewWithConfiguration:configuration];
     }
     return tab.webView;
 }
@@ -1071,11 +2064,21 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self setStatusText:self.webView.loading ? @"Loading" : @"Ready"];
     self.progressBar.progress = self.webView.estimatedProgress;
     self.progressBar.hidden = !self.webView.loading || self.webView.estimatedProgress >= 1.0;
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
 }
 
 - (void)newTab:(id)sender {
     (void)sender;
-    [self newTabWithURLString:[self homeURLString] select:YES];
+    if ([self activeTab].privateBrowsing) {
+        [self newPrivateTabWithURLString:[self homeURLString] select:YES];
+    } else {
+        [self newTabWithURLString:[self homeURLString] select:YES];
+    }
+}
+
+- (void)newPrivateTab:(id)sender {
+    (void)sender;
+    [self newPrivateTabWithURLString:[self homeURLString] select:YES];
 }
 
 - (void)closeCurrentTab:(id)sender {
@@ -1104,6 +2107,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         self.activeTabIndex = -1;
         [self.tabTable reloadData];
         [self newTabWithURLString:[self homeURLString] select:YES];
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
         return;
     }
 
@@ -1113,6 +2117,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.tabTable reloadData];
         NSInteger nextIndex = MIN(closingIndex, (NSInteger)self.tabs.count - 1);
         [self selectTabAtIndex:nextIndex];
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
         return;
     }
 
@@ -1122,10 +2127,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                byExtendingSelection:NO];
     [self refreshActiveRowHighlight];
     [self updateControls];
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
 }
 
 - (void)loadFromAddressField:(id)sender {
     (void)sender;
+    if (self.addressSuggestionIndex >= 0 && self.addressSuggestionIndex < (NSInteger)self.addressSuggestions.count) {
+        [self acceptAddressSuggestionAtIndex:self.addressSuggestionIndex];
+        return;
+    }
+    [self hideAddressSuggestionsPanel];
     self.userEditingAddress = NO;
     [self loadURLString:self.addressField.stringValue];
 }
@@ -1138,16 +2149,19 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     if ([self isHomeURLString:input]) {
         [self loadNativeHomePageInWebView:self.webView];
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
         return;
     }
 
     if ([self isSettingsURLString:input]) {
         [self loadNativeSettingsPageInWebView:self.webView];
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
         return;
     }
 
     if ([self isOnboardingURLString:input]) {
         [self loadNativeOnboardingPageInWebView:self.webView];
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
         return;
     }
 
@@ -1160,8 +2174,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.stringValue = url.absoluteString;
     BrowserTab *tab = [self activeTab];
     tab.urlString = url.absoluteString;
+    if (!tab.privateBrowsing) [self recordSearchInputIfNeeded:input resolvedURL:url];
     [self setStatusText:@"Loading"];
     [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
 }
 
 - (NSString *)homeURLString {
@@ -1265,6 +2281,92 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return YES;
     }
 
+    if ([host isEqualToString:@"clear-history"]) {
+        [self clearBrowsingHistory];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"cluster-history"]) {
+        [self refreshHistoryClustersWithAI];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"clear-downloads"]) {
+        [self clearDownloadHistory];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"clear-website-data"]) {
+        [self clearWebsiteDataReloadSettings:YES];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"clear-all-browsing-data"]) {
+        [self clearAllBrowsingData];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"set-permission"]) {
+        NSString *origin = [self queryValueNamed:@"origin" inURL:url];
+        NSString *kind = [self queryValueNamed:@"kind" inURL:url];
+        NSString *value = [self queryValueNamed:@"value" inURL:url];
+        [self setSitePermissionValue:value forOriginString:origin kind:kind];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"clear-permissions"]) {
+        [self clearSitePermissions];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"reveal-download"]) {
+        NSString *path = [self queryValueNamed:@"path" inURL:url];
+        [self revealDownloadAtPath:path];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"cancel-download"]) {
+        NSString *downloadID = [self queryValueNamed:@"id" inURL:url];
+        [self cancelDownloadWithID:downloadID];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"resume-download"]) {
+        NSString *downloadID = [self queryValueNamed:@"id" inURL:url];
+        [self resumeDownloadWithID:downloadID];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"import-bookmarks"]) {
+        [self importBookmarksFromHTML:nil];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"export-bookmarks"]) {
+        [self exportBookmarksToHTML:nil];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"remove-bookmark"]) {
+        NSString *urlString = [self queryValueNamed:@"url" inURL:url];
+        [self removeBookmarkForURLString:urlString];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
+    if ([host isEqualToString:@"update-bookmark"]) {
+        NSString *oldURL = [self queryValueNamed:@"url" inURL:url];
+        NSString *title = [self queryValueNamed:@"title" inURL:url];
+        NSString *newURL = [self queryValueNamed:@"newUrl" inURL:url];
+        [self updateBookmarkForURLString:oldURL title:title newURLString:newURL];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
     if ([host isEqualToString:@"set-pref"]) {
         NSString *key = [self queryValueNamed:@"key" inURL:url];
         NSString *value = [self queryValueNamed:@"value" inURL:url];
@@ -1329,6 +2431,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     NSString *html = [[self nativeResourceHTMLNamed:@"Settings"]
                       stringByReplacingOccurrencesOfString:@"</head>" withString:[self aiPrefsScript]];
+    html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsHistoryScript]];
+    html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsHistoryClustersScript]];
+    html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsBookmarksScript]];
+    html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsDownloadsScript]];
+    html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsPermissionsScript]];
 
     self.renderingInternalPage = YES;
     [webView loadHTMLString:html baseURL:[NSURL URLWithString:[self settingsURLString]]];
@@ -1446,8 +2553,75 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     return [[self supportDirectoryPath] stringByAppendingPathComponent:@"history.jsonl"];
 }
 
+- (NSString *)searchHistoryFilePath {
+    return [[self supportDirectoryPath] stringByAppendingPathComponent:@"searches.jsonl"];
+}
+
+- (NSString *)historyClustersFilePath {
+    return [[self supportDirectoryPath] stringByAppendingPathComponent:@"history-clusters.json"];
+}
+
+- (NSString *)bookmarksFilePath {
+    return [[self supportDirectoryPath] stringByAppendingPathComponent:@"bookmarks.json"];
+}
+
+- (NSString *)downloadsFilePath {
+    return [[self supportDirectoryPath] stringByAppendingPathComponent:@"downloads.jsonl"];
+}
+
+- (NSString *)downloadResumeDataDirectoryPath {
+    return [[self supportDirectoryPath] stringByAppendingPathComponent:@"download-resume-data"];
+}
+
+- (NSString *)permissionsFilePath {
+    return [[self supportDirectoryPath] stringByAppendingPathComponent:@"permissions.json"];
+}
+
 - (NSString *)stateFilePath {
     return [[self supportDirectoryPath] stringByAppendingPathComponent:@"state.json"];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)JSONLinesAtPath:(NSString *)path newestFirst:(BOOL)newestFirst {
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data.length) return @[];
+
+    NSString *content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (content.length == 0) return @[];
+
+    NSArray<NSString *> *lines = [content componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+    NSEnumerator<NSString *> *enumerator = newestFirst ? lines.reverseObjectEnumerator : lines.objectEnumerator;
+
+    for (NSString *line in enumerator) {
+        if (line.length == 0) continue;
+        NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
+        if (!lineData) continue;
+        id json = [NSJSONSerialization JSONObjectWithData:lineData options:0 error:nil];
+        if ([json isKindOfClass:NSDictionary.class]) [entries addObject:json];
+    }
+
+    return entries;
+}
+
+- (BOOL)isSearchURL:(NSURL *)url {
+    NSString *host = url.host.lowercaseString ?: @"";
+    return ([host isEqualToString:@"www.google.com"] || [host isEqualToString:@"google.com"]) &&
+           [url.path isEqualToString:@"/search"];
+}
+
+- (void)recordSearchInputIfNeeded:(NSString *)input resolvedURL:(NSURL *)url {
+    NSString *trimmed = [input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (trimmed.length == 0 || ![self isSearchURL:url]) return;
+    if ([trimmed hasPrefix:@"http://"] || [trimmed hasPrefix:@"https://"] || [trimmed containsString:@"://"]) return;
+    if ([self inputLooksLikeHostOrLocalAddress:trimmed]) return;
+
+    NSDictionary<NSString *, id> *entry = @{
+        @"timestamp": [[self historyDateFormatter] stringFromDate:[NSDate date]],
+        @"query": trimmed,
+        @"url": url.absoluteString ?: @"",
+        @"source": @"TrailBrowser"
+    };
+    [self appendJSONLine:entry toPath:[self searchHistoryFilePath]];
 }
 
 - (BOOL)isSensitiveQueryName:(NSString *)name {
@@ -1520,11 +2694,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)recordHistoryEntryForWebView:(WKWebView *)webView {
     NSURL *url = webView.URL;
     if (!url) return;
+    BrowserTab *tab = [self tabForWebView:webView];
+    if (tab.privateBrowsing) return;
 
     NSString *urlString = [self redactedURLStringForURL:url];
     if (urlString.length == 0) return;
 
-    BrowserTab *tab = [self tabForWebView:webView];
     NSString *lastRecordedURL = tab ? tab.lastRecordedURL : self.lastRecordedURL;
     if ([lastRecordedURL isEqualToString:urlString]) return;
     if (tab) {
@@ -1544,11 +2719,119 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self appendJSONLine:entry toPath:[self historyFilePath]];
 }
 
+- (NSDictionary<NSString *, id> *)browserStateDictionary {
+    NSData *data = [NSData dataWithContentsOfFile:[self stateFilePath]];
+    if (!data.length) return @{};
+
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [json isKindOfClass:NSDictionary.class] ? json : @{};
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)stateTabEntries {
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+    for (BrowserTab *tab in self.tabs) {
+        if (tab.privateBrowsing) continue;
+        NSString *urlString = tab.webView.URL.absoluteString ?: tab.urlString ?: @"";
+        if (urlString.length == 0) continue;
+        if ([urlString hasPrefix:@"view-source:"]) continue;
+        NSString *title = tab.webView.title.length ? tab.webView.title : (tab.title ?: @"");
+        [entries addObject:@{
+            @"url": urlString,
+            @"title": title ?: @"",
+            @"lastActiveSeq": @(tab.lastActiveSeq)
+        }];
+    }
+    return entries;
+}
+
+- (NSInteger)stateActiveTabIndex {
+    NSInteger stateIndex = 0;
+    for (NSInteger i = 0; i < (NSInteger)self.tabs.count; i++) {
+        BrowserTab *tab = self.tabs[(NSUInteger)i];
+        if (tab.privateBrowsing) continue;
+        if (i == self.activeTabIndex) return stateIndex;
+        stateIndex += 1;
+    }
+    return 0;
+}
+
+- (BOOL)windowFrameLooksUsable:(NSRect)frame {
+    if (NSWidth(frame) < 480.0 || NSHeight(frame) < 320.0) return NO;
+    for (NSScreen *screen in NSScreen.screens) {
+        if (NSIntersectsRect(frame, screen.visibleFrame)) return YES;
+    }
+    return NO;
+}
+
+- (void)restoreWindowStateFromDictionary:(NSDictionary<NSString *, id> *)state {
+    id frameValue = state[@"windowFrame"];
+    if ([frameValue isKindOfClass:NSString.class]) {
+        NSRect frame = NSRectFromString(frameValue);
+        if ([self windowFrameLooksUsable:frame]) {
+            [self.window setFrame:frame display:YES];
+        }
+    }
+
+    id sidebarValue = state[@"sidebarVisible"];
+    if ([sidebarValue isKindOfClass:NSNumber.class]) {
+        BOOL visible = [sidebarValue boolValue];
+        if (visible != self.sidebarVisible) {
+            self.sidebarVisible = visible;
+            self.sidebar.hidden = !visible;
+            self.sidebarSeparator.hidden = !visible;
+            self.sidebarWidthConstraint.constant = visible ? 240.0 : 0.0;
+            ((TBFlatButton *)self.sidebarToggleButton).active = visible;
+            [self.window.contentView layoutSubtreeIfNeeded];
+        }
+    }
+}
+
+- (BOOL)restorePreviousSessionIfAvailable {
+    NSDictionary<NSString *, id> *state = [self browserStateDictionary];
+    NSArray *tabs = [state[@"tabs"] isKindOfClass:NSArray.class] ? state[@"tabs"] : @[];
+    if (tabs.count == 0) return NO;
+
+    [self restoreWindowStateFromDictionary:state];
+
+    NSInteger activeIndex = [state[@"activeTabIndex"] isKindOfClass:NSNumber.class]
+        ? [state[@"activeTabIndex"] integerValue]
+        : 0;
+    if (activeIndex < 0 || activeIndex >= (NSInteger)tabs.count) activeIndex = 0;
+
+    self.restoringSession = YES;
+    for (NSUInteger i = 0; i < tabs.count; i++) {
+        id item = tabs[i];
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary<NSString *, id> *entry = item;
+        NSString *urlString = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (urlString.length == 0) continue;
+        BrowserTab *tab = [self newTabWithURLString:urlString select:((NSInteger)i == activeIndex)];
+        NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+        if (title.length > 0) tab.title = title;
+    }
+    self.restoringSession = NO;
+
+    if (self.tabs.count == 0) return NO;
+    if (self.activeTabIndex < 0) [self selectTabAtIndex:0];
+    [self.tabTable reloadData];
+    return YES;
+}
+
 - (void)writeBrowserStateRunning:(BOOL)running {
     NSDictionary<NSString *, id> *state = @{
         @"running": @(running),
         @"updatedAt": [[self historyDateFormatter] stringFromDate:[NSDate date]],
         @"historyFile": [self historyFilePath],
+        @"searchHistoryFile": [self searchHistoryFilePath],
+        @"historyClustersFile": [self historyClustersFilePath],
+        @"bookmarksFile": [self bookmarksFilePath],
+        @"downloadsFile": [self downloadsFilePath],
+        @"downloadResumeDataDirectory": [self downloadResumeDataDirectoryPath],
+        @"permissionsFile": [self permissionsFilePath],
+        @"tabs": [self stateTabEntries],
+        @"activeTabIndex": @([self stateActiveTabIndex]),
+        @"sidebarVisible": @(self.sidebarVisible),
+        @"windowFrame": self.window ? NSStringFromRect(self.window.frame) : @"",
         @"cookiesExposed": @NO
     };
 
@@ -1558,6 +2841,1566 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                                      error:&error];
     if (!json) return;
     [json writeToFile:[self stateFilePath] options:NSDataWritingAtomic error:nil];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)settingsHistoryEntries {
+    NSArray<NSDictionary<NSString *, id> *> *history = [self JSONLinesAtPath:[self historyFilePath] newestFirst:YES];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray arrayWithCapacity:history.count];
+
+    for (NSDictionary<NSString *, id> *entry in history) {
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (url.length == 0) continue;
+        [entries addObject:@{
+            @"timestamp": [entry[@"timestamp"] isKindOfClass:NSString.class] ? entry[@"timestamp"] : @"",
+            @"title": [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"",
+            @"url": url,
+            @"host": [entry[@"host"] isKindOfClass:NSString.class] ? entry[@"host"] : @""
+        }];
+    }
+    return entries;
+}
+
+- (NSString *)settingsHistoryScript {
+    NSArray<NSDictionary<NSString *, id> *> *history = [self settingsHistoryEntries];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:history options:0 error:nil];
+    NSString *jsonString = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"[]";
+    return [NSString stringWithFormat:@"<script>window.__tbHistory=%@;</script></head>", jsonString ?: @"[]"];
+}
+
+- (NSDictionary<NSString *, id> *)cachedHistoryClusters {
+    NSData *data = [NSData dataWithContentsOfFile:[self historyClustersFilePath]];
+    if (!data.length) return @{};
+
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [json isKindOfClass:NSDictionary.class] ? json : @{};
+}
+
+- (NSString *)settingsHistoryClustersScript {
+    NSDictionary<NSString *, id> *clusters = [self cachedHistoryClusters];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:clusters.count ? clusters : @{}
+                                                   options:0
+                                                     error:nil];
+    NSString *jsonString = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"{}";
+    return [NSString stringWithFormat:@"<script>window.__tbHistoryClusters=%@;</script></head>", jsonString ?: @"{}"];
+}
+
+- (void)clearBrowsingHistory {
+    [[NSFileManager defaultManager] removeItemAtPath:[self historyFilePath] error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:[self searchHistoryFilePath] error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:[self historyClustersFilePath] error:NULL];
+    for (BrowserTab *tab in self.tabs) tab.lastRecordedURL = nil;
+    self.lastRecordedURL = nil;
+    [self writeBrowserStateRunning:YES];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)historyEntriesForAIClustering {
+    NSArray<NSDictionary<NSString *, id> *> *history = [self settingsHistoryEntries];
+    NSUInteger limit = MIN(history.count, 120);
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray arrayWithCapacity:limit];
+    for (NSUInteger i = 0; i < limit; i++) {
+        NSDictionary<NSString *, id> *entry = history[i];
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (url.length == 0) continue;
+        [entries addObject:@{
+            @"title": [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"",
+            @"url": url,
+            @"host": [entry[@"host"] isKindOfClass:NSString.class] ? entry[@"host"] : @"",
+            @"timestamp": [entry[@"timestamp"] isKindOfClass:NSString.class] ? entry[@"timestamp"] : @""
+        }];
+    }
+    return entries;
+}
+
+- (id)JSONObjectFromAIOutput:(NSString *)output {
+    NSString *trimmed = [output stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSRegularExpression *fence =
+        [NSRegularExpression regularExpressionWithPattern:@"```(?:json)?\\s*(.*?)```"
+                                                  options:NSRegularExpressionCaseInsensitive | NSRegularExpressionDotMatchesLineSeparators
+                                                    error:nil];
+    NSTextCheckingResult *match = [fence firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+    if (match && match.numberOfRanges > 1) {
+        trimmed = [[trimmed substringWithRange:[match rangeAtIndex:1]]
+                   stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    }
+    NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
+    return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)sanitizedHistoryClustersFromJSON:(id)json
+                                                                       entries:(NSArray<NSDictionary<NSString *, id> *> *)entries {
+    NSDictionary *root = [json isKindOfClass:NSDictionary.class] ? json : nil;
+    NSArray *clusters = [root[@"clusters"] isKindOfClass:NSArray.class] ? root[@"clusters"] : nil;
+    if (clusters.count == 0) return @[];
+
+    NSMutableSet<NSString *> *knownURLs = [NSMutableSet set];
+    for (NSDictionary<NSString *, id> *entry in entries) {
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (url.length > 0) [knownURLs addObject:url];
+    }
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *clean = [NSMutableArray array];
+    for (id item in clusters) {
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *cluster = item;
+        NSString *label = [cluster[@"label"] isKindOfClass:NSString.class] ? cluster[@"label"] : @"";
+        NSString *reason = [cluster[@"reason"] isKindOfClass:NSString.class] ? cluster[@"reason"] : @"";
+        NSArray *urls = [cluster[@"urls"] isKindOfClass:NSArray.class] ? cluster[@"urls"] : @[];
+        if (label.length == 0 || urls.count == 0) continue;
+
+        NSMutableArray<NSString *> *cleanURLs = [NSMutableArray array];
+        for (id rawURL in urls) {
+            if (![rawURL isKindOfClass:NSString.class]) continue;
+            if (![knownURLs containsObject:rawURL]) continue;
+            if (![cleanURLs containsObject:rawURL]) [cleanURLs addObject:rawURL];
+        }
+        if (cleanURLs.count == 0) continue;
+        [clean addObject:@{
+            @"label": label,
+            @"reason": reason.length ? reason : @"AI grouped these pages by topic and intent.",
+            @"urls": cleanURLs
+        }];
+        if (clean.count >= 8) break;
+    }
+    return clean;
+}
+
+- (void)writeHistoryClusters:(NSArray<NSDictionary<NSString *, id> *> *)clusters source:(NSString *)source {
+    NSDictionary<NSString *, id> *payload = @{
+        @"updatedAt": [[self historyDateFormatter] stringFromDate:[NSDate date]],
+        @"source": source ?: @"ai",
+        @"historyCount": @([self settingsHistoryEntries].count),
+        @"clusters": clusters ?: @[]
+    };
+    if (![NSJSONSerialization isValidJSONObject:payload]) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload
+                                                   options:NSJSONWritingPrettyPrinted
+                                                     error:nil];
+    if (!data) return;
+    [data writeToFile:[self historyClustersFilePath] options:NSDataWritingAtomic error:nil];
+}
+
+- (void)refreshHistoryClustersWithAI {
+    NSArray<NSDictionary<NSString *, id> *> *entries = [self historyEntriesForAIClustering];
+    if (entries.count == 0) {
+        [self setStatusText:@"No history to cluster"];
+        NSBeep();
+        return;
+    }
+
+    NSData *json = [NSJSONSerialization dataWithJSONObject:entries options:0 error:nil];
+    NSString *historyJSON = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"[]";
+    NSString *prompt = [NSString stringWithFormat:
+        @"You are TrailBrowser's history clustering engine.\n"
+         "Group browsing history into 4 to 8 useful clusters for a browser History UI.\n"
+         "Return strict JSON only, no markdown, matching this shape:\n"
+         "{\"clusters\":[{\"label\":\"short topic\",\"reason\":\"one short human sentence\",\"urls\":[\"exact URL from input\"]}]}\n"
+         "Rules:\n"
+         "- Use only URLs from the input, copied exactly.\n"
+         "- Prefer intent/topic clusters over raw domains when possible.\n"
+         "- Put each URL in at most one cluster.\n"
+         "- Keep labels under 28 characters.\n"
+         "- Ignore duplicate or trivial internal pages unless they help a cluster.\n\n"
+         "History JSON:\n%@",
+        historyJSON ?: @"[]"];
+
+    [self setStatusText:@"Clustering history"];
+    [self runAIWithPrompt:prompt enableSearch:NO effortOverride:@"low" completion:^(NSString *output, NSError *error) {
+        if (error) {
+            [self setStatusText:error.localizedDescription ?: @"History clustering failed"];
+            return;
+        }
+        id parsed = [self JSONObjectFromAIOutput:output];
+        NSArray<NSDictionary<NSString *, id> *> *clusters = [self sanitizedHistoryClustersFromJSON:parsed entries:entries];
+        if (clusters.count == 0) {
+            [self setStatusText:@"History clustering returned no groups"];
+            return;
+        }
+        [self writeHistoryClusters:clusters source:@"ai"];
+        [self setStatusText:@"History clusters updated"];
+        if (self.webView && [self isSettingsURLString:self.webView.URL.absoluteString]) {
+            [self loadNativeSettingsPageInWebView:self.webView];
+        }
+        [self writeBrowserStateRunning:YES];
+    }];
+}
+
+- (void)clearWebsiteDataReloadSettings:(BOOL)reloadSettings {
+    [self setStatusText:@"Clearing website data…"];
+    NSSet<NSString *> *types = [WKWebsiteDataStore allWebsiteDataTypes];
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:0];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:types
+                                               modifiedSince:date
+                                           completionHandler:^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self setStatusText:@"Website data cleared"];
+            if (reloadSettings && self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        });
+    }];
+}
+
+- (void)clearAllBrowsingData {
+    [self clearBrowsingHistory];
+    [self clearDownloadHistory];
+    [self clearSitePermissions];
+    [self clearWebsiteDataReloadSettings:YES];
+}
+
+#pragma mark - Site permissions
+
+- (NSArray<NSString *> *)sitePermissionKinds {
+    return @[ TBSitePermissionCamera, TBSitePermissionMicrophone ];
+}
+
+- (BOOL)isSupportedSitePermissionKind:(NSString *)kind {
+    return [[self sitePermissionKinds] containsObject:kind ?: @""];
+}
+
+- (BOOL)isExplicitSitePermissionValue:(NSString *)value {
+    return [value isEqualToString:TBSitePermissionAllow] ||
+           [value isEqualToString:TBSitePermissionDeny];
+}
+
+- (BOOL)isSupportedSitePermissionValue:(NSString *)value {
+    return [value isEqualToString:TBSitePermissionAsk] ||
+           [self isExplicitSitePermissionValue:value];
+}
+
+- (NSString *)normalizedOriginStringWithScheme:(NSString *)scheme
+                                          host:(NSString *)host
+                                          port:(NSInteger)port {
+    NSString *lowerScheme = scheme.lowercaseString ?: @"";
+    NSString *lowerHost = host.lowercaseString ?: @"";
+    if ((! [lowerScheme isEqualToString:@"http"] && ![lowerScheme isEqualToString:@"https"]) ||
+        lowerHost.length == 0) {
+        return nil;
+    }
+
+    NSURLComponents *components = [[NSURLComponents alloc] init];
+    components.scheme = lowerScheme;
+    components.host = lowerHost;
+    BOOL defaultPort = ([lowerScheme isEqualToString:@"http"] && port == 80) ||
+                       ([lowerScheme isEqualToString:@"https"] && port == 443);
+    if (port > 0 && !defaultPort) components.port = @(port);
+    return components.URL.absoluteString;
+}
+
+- (NSString *)normalizedOriginStringFromString:(NSString *)originString {
+    if (originString.length == 0) return nil;
+    NSURLComponents *components = [NSURLComponents componentsWithString:originString];
+    return [self normalizedOriginStringWithScheme:components.scheme
+                                             host:components.host
+                                             port:components.port.integerValue];
+}
+
+- (NSString *)originStringForURL:(NSURL *)url {
+    if (!url) return nil;
+    NSURLComponents *components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+    return [self normalizedOriginStringWithScheme:components.scheme
+                                             host:components.host
+                                             port:components.port.integerValue];
+}
+
+- (NSString *)originStringForSecurityOrigin:(WKSecurityOrigin *)origin {
+    if (!origin) return nil;
+    return [self normalizedOriginStringWithScheme:origin.protocol
+                                             host:origin.host
+                                             port:origin.port];
+}
+
+- (NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *)sitePermissionsByOrigin {
+    NSData *data = [NSData dataWithContentsOfFile:[self permissionsFilePath]];
+    if (!data.length) return @{};
+
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![json isKindOfClass:NSDictionary.class]) return @{};
+
+    NSDictionary *rawPermissions = (NSDictionary *)json;
+    NSMutableDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *clean = [NSMutableDictionary dictionary];
+    for (id rawOrigin in rawPermissions) {
+        if (![rawOrigin isKindOfClass:NSString.class]) continue;
+        NSString *origin = [self normalizedOriginStringFromString:(NSString *)rawOrigin];
+        if (origin.length == 0) continue;
+
+        id rawEntry = rawPermissions[rawOrigin];
+        if (![rawEntry isKindOfClass:NSDictionary.class]) continue;
+
+        NSMutableDictionary<NSString *, NSString *> *entry = [NSMutableDictionary dictionary];
+        NSDictionary *rawEntryDictionary = (NSDictionary *)rawEntry;
+        for (NSString *kind in [self sitePermissionKinds]) {
+            NSString *value = [rawEntryDictionary[kind] isKindOfClass:NSString.class] ? rawEntryDictionary[kind] : nil;
+            if ([self isExplicitSitePermissionValue:value]) entry[kind] = value;
+        }
+        NSString *updatedAt = [rawEntryDictionary[@"updatedAt"] isKindOfClass:NSString.class] ? rawEntryDictionary[@"updatedAt"] : nil;
+        if (updatedAt.length > 0 && entry.count > 0) entry[@"updatedAt"] = updatedAt;
+        if (entry.count > 0) clean[origin] = entry;
+    }
+    return clean;
+}
+
+- (void)writeSitePermissionsByOrigin:(NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *)permissions {
+    if (permissions.count == 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:[self permissionsFilePath] error:NULL];
+        return;
+    }
+
+    if (![NSJSONSerialization isValidJSONObject:permissions]) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:permissions
+                                                   options:NSJSONWritingPrettyPrinted
+                                                     error:nil];
+    if (!data) return;
+    [data writeToFile:[self permissionsFilePath] options:NSDataWritingAtomic error:nil];
+}
+
+- (NSString *)sitePermissionValueForOriginString:(NSString *)originString kind:(NSString *)kind {
+    if (![self isSupportedSitePermissionKind:kind]) return TBSitePermissionAsk;
+    NSString *origin = [self normalizedOriginStringFromString:originString];
+    if (origin.length == 0) return TBSitePermissionAsk;
+
+    NSDictionary<NSString *, NSString *> *entry = [self sitePermissionsByOrigin][origin];
+    NSString *value = entry[kind];
+    return [self isExplicitSitePermissionValue:value] ? value : TBSitePermissionAsk;
+}
+
+- (void)setSitePermissionValue:(NSString *)value
+               forOriginString:(NSString *)originString
+                           kind:(NSString *)kind {
+    NSString *origin = [self normalizedOriginStringFromString:originString];
+    if (origin.length == 0 ||
+        ![self isSupportedSitePermissionKind:kind] ||
+        ![self isSupportedSitePermissionValue:value]) {
+        NSBeep();
+        return;
+    }
+
+    NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *storedPermissions = [self sitePermissionsByOrigin];
+    NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, NSString *> *> *permissions = [NSMutableDictionary dictionary];
+    for (NSString *storedOrigin in storedPermissions) {
+        permissions[storedOrigin] = [storedPermissions[storedOrigin] mutableCopy];
+    }
+
+    NSMutableDictionary<NSString *, NSString *> *entry = permissions[origin] ?: [NSMutableDictionary dictionary];
+    if ([self isExplicitSitePermissionValue:value]) {
+        entry[kind] = value;
+        entry[@"updatedAt"] = [[self historyDateFormatter] stringFromDate:[NSDate date]];
+        permissions[origin] = entry;
+        [self setStatusText:@"Site permission saved"];
+    } else {
+        [entry removeObjectForKey:kind];
+        if (entry[TBSitePermissionCamera] || entry[TBSitePermissionMicrophone]) {
+            entry[@"updatedAt"] = [[self historyDateFormatter] stringFromDate:[NSDate date]];
+            permissions[origin] = entry;
+        } else {
+            [permissions removeObjectForKey:origin];
+        }
+        [self setStatusText:@"Site permission reset"];
+    }
+
+    [self writeSitePermissionsByOrigin:permissions];
+    [self writeBrowserStateRunning:YES];
+}
+
+- (void)clearSitePermissions {
+    [[NSFileManager defaultManager] removeItemAtPath:[self permissionsFilePath] error:NULL];
+    [self setStatusText:@"Site permissions cleared"];
+    [self writeBrowserStateRunning:YES];
+}
+
+- (NSString *)displayLabelForSitePermissionValue:(NSString *)value {
+    if ([value isEqualToString:TBSitePermissionAllow]) return @"Allowed";
+    if ([value isEqualToString:TBSitePermissionDeny]) return @"Blocked";
+    return @"Ask every time";
+}
+
+- (NSString *)sitePermissionSummaryForURL:(NSURL *)url {
+    NSString *origin = [self originStringForURL:url];
+    if (origin.length == 0) return @"";
+
+    NSString *camera = [self sitePermissionValueForOriginString:origin kind:TBSitePermissionCamera];
+    NSString *microphone = [self sitePermissionValueForOriginString:origin kind:TBSitePermissionMicrophone];
+    if ([camera isEqualToString:TBSitePermissionAsk] &&
+        [microphone isEqualToString:TBSitePermissionAsk]) {
+        return @"Camera and microphone permissions: ask when needed.";
+    }
+
+    return [NSString stringWithFormat:@"Site permissions for %@:\nCamera: %@\nMicrophone: %@",
+            origin,
+            [self displayLabelForSitePermissionValue:camera],
+            [self displayLabelForSitePermissionValue:microphone]];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)settingsPermissionEntries {
+    NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *permissions = [self sitePermissionsByOrigin];
+    NSArray<NSString *> *origins = [permissions.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray arrayWithCapacity:origins.count];
+
+    for (NSString *origin in origins) {
+        NSDictionary<NSString *, NSString *> *entry = permissions[origin];
+        [entries addObject:@{
+            @"origin": origin,
+            @"camera": entry[TBSitePermissionCamera] ?: TBSitePermissionAsk,
+            @"microphone": entry[TBSitePermissionMicrophone] ?: TBSitePermissionAsk,
+            @"updatedAt": entry[@"updatedAt"] ?: @""
+        }];
+    }
+    return entries;
+}
+
+- (NSString *)settingsPermissionsScript {
+    NSArray<NSDictionary<NSString *, id> *> *permissions = [self settingsPermissionEntries];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:permissions options:0 error:nil];
+    NSString *jsonString = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"[]";
+    return [NSString stringWithFormat:@"<script>window.__tbPermissions=%@;</script></head>", jsonString ?: @"[]"];
+}
+
+- (NSArray<NSString *> *)sitePermissionKindsForMediaCaptureType:(WKMediaCaptureType)type {
+    switch (type) {
+        case WKMediaCaptureTypeCamera:
+            return @[ TBSitePermissionCamera ];
+        case WKMediaCaptureTypeMicrophone:
+            return @[ TBSitePermissionMicrophone ];
+        case WKMediaCaptureTypeCameraAndMicrophone:
+            return @[ TBSitePermissionCamera, TBSitePermissionMicrophone ];
+    }
+    return @[ TBSitePermissionCamera, TBSitePermissionMicrophone ];
+}
+
+- (NSString *)mediaCaptureLabelForType:(WKMediaCaptureType)type {
+    switch (type) {
+        case WKMediaCaptureTypeCamera:
+            return @"camera";
+        case WKMediaCaptureTypeMicrophone:
+            return @"microphone";
+        case WKMediaCaptureTypeCameraAndMicrophone:
+            return @"camera and microphone";
+    }
+    return @"camera and microphone";
+}
+
+- (BOOL)allSitePermissionKindsAllowed:(NSArray<NSString *> *)kinds originString:(NSString *)originString {
+    for (NSString *kind in kinds) {
+        if (![[self sitePermissionValueForOriginString:originString kind:kind] isEqualToString:TBSitePermissionAllow]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
+- (BOOL)anySitePermissionKindDenied:(NSArray<NSString *> *)kinds originString:(NSString *)originString {
+    for (NSString *kind in kinds) {
+        if ([[self sitePermissionValueForOriginString:originString kind:kind] isEqualToString:TBSitePermissionDeny]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+#pragma mark - Bookmarks
+
+- (NSArray<NSDictionary<NSString *, id> *> *)bookmarkEntries {
+    NSData *data = [NSData dataWithContentsOfFile:[self bookmarksFilePath]];
+    if (!data.length) return @[];
+
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![json isKindOfClass:NSArray.class]) return @[];
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+    for (id item in (NSArray *)json) {
+        if ([item isKindOfClass:NSDictionary.class]) [entries addObject:item];
+    }
+    return entries;
+}
+
+- (void)writeBookmarkEntries:(NSArray<NSDictionary<NSString *, id> *> *)entries {
+    if (![NSJSONSerialization isValidJSONObject:entries]) return;
+
+    NSData *data = [NSJSONSerialization dataWithJSONObject:entries
+                                                   options:NSJSONWritingPrettyPrinted
+                                                     error:nil];
+    if (!data) return;
+    [data writeToFile:[self bookmarksFilePath] options:NSDataWritingAtomic error:nil];
+}
+
+- (NSString *)bookmarkURLStringForCurrentPage {
+    NSURL *url = self.webView.URL;
+    if (!url) {
+        NSString *tabURLString = [self activeTab].urlString ?: @"";
+        url = [NSURL URLWithString:tabURLString];
+    }
+    NSString *scheme = url.scheme.lowercaseString;
+    BOOL bookmarkable = [scheme isEqualToString:@"http"] ||
+                        [scheme isEqualToString:@"https"] ||
+                        [scheme isEqualToString:@"file"];
+    return bookmarkable ? (url.absoluteString ?: @"") : @"";
+}
+
+- (BOOL)isURLStringBookmarked:(NSString *)urlString {
+    if (urlString.length == 0) return NO;
+    for (NSDictionary<NSString *, id> *entry in [self bookmarkEntries]) {
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if ([url isEqualToString:urlString]) return YES;
+    }
+    return NO;
+}
+
+- (BOOL)isCurrentPageBookmarked {
+    return [self isURLStringBookmarked:[self bookmarkURLStringForCurrentPage]];
+}
+
+- (void)toggleBookmarkCurrentPage:(id)sender {
+    (void)sender;
+    NSString *urlString = [self bookmarkURLStringForCurrentPage];
+    if (urlString.length == 0) {
+        NSBeep();
+        return;
+    }
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [[self bookmarkEntries] mutableCopy] ?: [NSMutableArray array];
+    NSUInteger existingIndex = NSNotFound;
+    for (NSUInteger i = 0; i < entries.count; i++) {
+        NSString *url = [entries[i][@"url"] isKindOfClass:NSString.class] ? entries[i][@"url"] : @"";
+        if ([url isEqualToString:urlString]) {
+            existingIndex = i;
+            break;
+        }
+    }
+
+    if (existingIndex != NSNotFound) {
+        [entries removeObjectAtIndex:existingIndex];
+        [self setStatusText:@"Bookmark removed"];
+    } else {
+        NSURL *url = [NSURL URLWithString:urlString];
+        BrowserTab *tab = [self activeTab];
+        NSString *title = self.webView.title.length ? self.webView.title : tab.title;
+        if (title.length == 0) title = url.host.length ? url.host : urlString;
+        NSDictionary<NSString *, id> *entry = @{
+            @"title": title ?: urlString,
+            @"url": urlString,
+            @"host": url.host ?: @"",
+            @"createdAt": [[self historyDateFormatter] stringFromDate:[NSDate date]]
+        };
+        [entries insertObject:entry atIndex:0];
+        [self setStatusText:@"Bookmarked"];
+    }
+
+    [self writeBookmarkEntries:entries];
+    [self updateBookmarkButton];
+}
+
+- (void)removeBookmarkForURLString:(NSString *)urlString {
+    if (urlString.length == 0) return;
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [[self bookmarkEntries] mutableCopy] ?: [NSMutableArray array];
+    NSIndexSet *matches = [entries indexesOfObjectsPassingTest:^BOOL(NSDictionary<NSString *,id> *entry,
+                                                                     NSUInteger idx,
+                                                                     BOOL *stop) {
+        (void)idx;
+        (void)stop;
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        return [url isEqualToString:urlString];
+    }];
+    if (matches.count == 0) return;
+
+    [entries removeObjectsAtIndexes:matches];
+    [self writeBookmarkEntries:entries];
+    [self updateBookmarkButton];
+}
+
+- (void)updateBookmarkForURLString:(NSString *)oldURLString
+                              title:(NSString *)title
+                       newURLString:(NSString *)newURLString {
+    if (oldURLString.length == 0 || newURLString.length == 0) return;
+    NSURL *url = [self URLForUserInput:newURLString];
+    NSString *scheme = url.scheme.lowercaseString;
+    BOOL supported = [scheme isEqualToString:@"http"] ||
+                     [scheme isEqualToString:@"https"] ||
+                     [scheme isEqualToString:@"file"];
+    if (!supported) return;
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [[self bookmarkEntries] mutableCopy] ?: [NSMutableArray array];
+    for (NSUInteger i = 0; i < entries.count; i++) {
+        NSString *candidate = [entries[i][@"url"] isKindOfClass:NSString.class] ? entries[i][@"url"] : @"";
+        if (![candidate isEqualToString:oldURLString]) continue;
+        NSMutableDictionary<NSString *, id> *updated = [entries[i] mutableCopy];
+        updated[@"title"] = title.length ? title : (url.host.length ? url.host : newURLString);
+        updated[@"url"] = url.absoluteString ?: newURLString;
+        updated[@"host"] = url.host ?: @"";
+        updated[@"updatedAt"] = [[self historyDateFormatter] stringFromDate:[NSDate date]];
+        entries[i] = updated;
+        break;
+    }
+
+    [self writeBookmarkEntries:entries];
+    [self updateBookmarkButton];
+}
+
+- (NSString *)stringByStrippingHTMLTags:(NSString *)html {
+    if (html.length == 0) return @"";
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"<[^>]+>"
+                                                                           options:0
+                                                                             error:nil];
+    NSString *plain = [regex stringByReplacingMatchesInString:html
+                                                      options:0
+                                                        range:NSMakeRange(0, html.length)
+                                                 withTemplate:@""];
+    return [plain stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+- (NSString *)stringByDecodingBasicHTMLEntities:(NSString *)text {
+    if (text.length == 0) return @"";
+    NSString *value = text;
+    NSDictionary<NSString *, NSString *> *entities = @{
+        @"&quot;": @"\"",
+        @"&#34;": @"\"",
+        @"&#39;": @"'",
+        @"&apos;": @"'",
+        @"&lt;": @"<",
+        @"&gt;": @">",
+        @"&amp;": @"&"
+    };
+    for (NSString *entity in entities) {
+        value = [value stringByReplacingOccurrencesOfString:entity
+                                                 withString:entities[entity]
+                                                    options:NSCaseInsensitiveSearch
+                                                      range:NSMakeRange(0, value.length)];
+    }
+    return value;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)bookmarkEntriesFromNetscapeHTML:(NSString *)html {
+    if (html.length == 0) return @[];
+    NSString *pattern = @"<A\\s+[^>]*HREF\\s*=\\s*([\"'])(.*?)\\1[^>]*>(.*?)</A>";
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern
+                                                                           options:(NSRegularExpressionCaseInsensitive |
+                                                                                    NSRegularExpressionDotMatchesLineSeparators)
+                                                                             error:nil];
+    NSArray<NSTextCheckingResult *> *matches = [regex matchesInString:html
+                                                              options:0
+                                                                range:NSMakeRange(0, html.length)];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray arrayWithCapacity:matches.count];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    NSString *timestamp = [[self historyDateFormatter] stringFromDate:[NSDate date]];
+
+    for (NSTextCheckingResult *match in matches) {
+        if (match.numberOfRanges < 4) continue;
+        NSString *urlString = [html substringWithRange:[match rangeAtIndex:2]];
+        urlString = [self stringByDecodingBasicHTMLEntities:urlString];
+        NSURL *url = [NSURL URLWithString:urlString];
+        NSString *scheme = url.scheme.lowercaseString;
+        BOOL supported = [scheme isEqualToString:@"http"] ||
+                         [scheme isEqualToString:@"https"] ||
+                         [scheme isEqualToString:@"file"];
+        if (!supported || url.absoluteString.length == 0) continue;
+        if ([seen containsObject:url.absoluteString]) continue;
+
+        NSString *title = [html substringWithRange:[match rangeAtIndex:3]];
+        title = [self stringByStrippingHTMLTags:title];
+        title = [self stringByDecodingBasicHTMLEntities:title];
+        if (title.length == 0) title = url.host.length ? url.host : url.absoluteString;
+
+        [seen addObject:url.absoluteString];
+        [entries addObject:@{
+            @"title": title ?: url.absoluteString,
+            @"url": url.absoluteString,
+            @"host": url.host ?: @"",
+            @"createdAt": timestamp,
+            @"source": @"import"
+        }];
+    }
+    return entries;
+}
+
+- (void)importBookmarksFromHTML:(id)sender {
+    (void)sender;
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.title = @"Import Bookmarks";
+    panel.canChooseFiles = YES;
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.allowedContentTypes = @[ UTTypeHTML, UTTypePlainText ];
+
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        if (result != NSModalResponseOK || !panel.URL) return;
+        NSError *error = nil;
+        NSStringEncoding encoding = NSUTF8StringEncoding;
+        NSString *html = [NSString stringWithContentsOfURL:panel.URL
+                                              usedEncoding:&encoding
+                                                     error:&error];
+        if (html.length == 0 || error) {
+            [self setStatusText:error.localizedDescription ?: @"Could not read bookmarks"];
+            NSBeep();
+            return;
+        }
+
+        NSArray<NSDictionary<NSString *, id> *> *incoming = [self bookmarkEntriesFromNetscapeHTML:html];
+        if (incoming.count == 0) {
+            [self setStatusText:@"No bookmarks found"];
+            NSBeep();
+            return;
+        }
+
+        NSArray<NSDictionary<NSString *, id> *> *existing = [self bookmarkEntries];
+        NSMutableSet<NSString *> *existingURLs = [NSMutableSet set];
+        for (NSDictionary<NSString *, id> *entry in existing) {
+            NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+            if (url.length > 0) [existingURLs addObject:url];
+        }
+
+        NSMutableArray<NSDictionary<NSString *, id> *> *merged = [NSMutableArray array];
+        NSUInteger imported = 0;
+        for (NSDictionary<NSString *, id> *entry in incoming) {
+            NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+            if (url.length == 0 || [existingURLs containsObject:url]) continue;
+            [existingURLs addObject:url];
+            [merged addObject:entry];
+            imported += 1;
+        }
+        [merged addObjectsFromArray:existing];
+        if (imported == 0) {
+            [self setStatusText:@"Bookmarks already imported"];
+            return;
+        }
+
+        [self writeBookmarkEntries:merged];
+        [self updateBookmarkButton];
+        [self writeBrowserStateRunning:YES];
+        [self setStatusText:[NSString stringWithFormat:@"Imported %lu bookmark%@", (unsigned long)imported, imported == 1 ? @"" : @"s"]];
+        if (self.webView && [self isSettingsURLString:self.webView.URL.absoluteString]) {
+            [self loadNativeSettingsPageInWebView:self.webView];
+        }
+    }];
+}
+
+- (NSString *)htmlAttributeEscaped:(NSString *)text {
+    NSString *value = [self htmlEscaped:text ?: @""];
+    value = [value stringByReplacingOccurrencesOfString:@"\"" withString:@"&quot;"];
+    return value;
+}
+
+- (NSInteger)unixTimestampForBookmarkDateString:(NSString *)dateString {
+    if (dateString.length == 0) return (NSInteger)[NSDate date].timeIntervalSince1970;
+    NSDate *date = [[self historyDateFormatter] dateFromString:dateString];
+    return (NSInteger)(date ?: [NSDate date]).timeIntervalSince1970;
+}
+
+- (NSString *)bookmarksExportHTML {
+    NSArray<NSDictionary<NSString *, id> *> *entries = [self bookmarkEntries];
+    NSMutableString *html = [NSMutableString stringWithString:
+        @"<!DOCTYPE NETSCAPE-Bookmark-file-1>\n"
+         "<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n"
+         "<TITLE>Bookmarks</TITLE>\n"
+         "<H1>TrailBrowser Bookmarks</H1>\n"
+         "<DL><p>\n"];
+
+    for (NSDictionary<NSString *, id> *entry in entries) {
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (url.length == 0) continue;
+        NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+        if (title.length == 0) title = url;
+        NSString *createdAt = [entry[@"createdAt"] isKindOfClass:NSString.class] ? entry[@"createdAt"] : @"";
+        [html appendFormat:@"    <DT><A HREF=\"%@\" ADD_DATE=\"%ld\">%@</A>\n",
+         [self htmlAttributeEscaped:url],
+         (long)[self unixTimestampForBookmarkDateString:createdAt],
+         [self htmlEscaped:title]];
+    }
+    [html appendString:@"</DL><p>\n"];
+    return html;
+}
+
+- (void)exportBookmarksToHTML:(id)sender {
+    (void)sender;
+    NSArray<NSDictionary<NSString *, id> *> *entries = [self bookmarkEntries];
+    if (entries.count == 0) {
+        [self setStatusText:@"No bookmarks to export"];
+        NSBeep();
+        return;
+    }
+
+    NSSavePanel *panel = [NSSavePanel savePanel];
+    panel.title = @"Export Bookmarks";
+    panel.nameFieldStringValue = @"TrailBrowser Bookmarks.html";
+    panel.canCreateDirectories = YES;
+    panel.allowedContentTypes = @[ UTTypeHTML ];
+
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        if (result != NSModalResponseOK || !panel.URL) return;
+        NSError *error = nil;
+        NSString *html = [self bookmarksExportHTML];
+        if (![html writeToURL:panel.URL atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+            [self setStatusText:error.localizedDescription ?: @"Could not export bookmarks"];
+            NSBeep();
+            return;
+        }
+        [self setStatusText:@"Bookmarks exported"];
+    }];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)settingsBookmarkEntries {
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+    for (NSDictionary<NSString *, id> *entry in [self bookmarkEntries]) {
+        NSString *url = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (url.length == 0) continue;
+        [entries addObject:@{
+            @"title": [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"",
+            @"url": url,
+            @"host": [entry[@"host"] isKindOfClass:NSString.class] ? entry[@"host"] : @"",
+            @"createdAt": [entry[@"createdAt"] isKindOfClass:NSString.class] ? entry[@"createdAt"] : @""
+        }];
+    }
+    return entries;
+}
+
+- (NSString *)settingsBookmarksScript {
+    NSArray<NSDictionary<NSString *, id> *> *bookmarks = [self settingsBookmarkEntries];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:bookmarks options:0 error:nil];
+    NSString *jsonString = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"[]";
+    return [NSString stringWithFormat:@"<script>window.__tbBookmarks=%@;</script></head>", jsonString ?: @"[]"];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)recentBookmarkEntriesLimitedTo:(NSUInteger)limit {
+    NSArray<NSDictionary<NSString *, id> *> *entries = [self settingsBookmarkEntries];
+    if (entries.count <= limit) return entries;
+    return [entries subarrayWithRange:NSMakeRange(0, limit)];
+}
+
+- (NSString *)downloadIDForMetadata:(NSMutableDictionary<NSString *, id> *)metadata {
+    NSString *downloadID = [metadata[@"id"] isKindOfClass:NSString.class] ? metadata[@"id"] : @"";
+    if (downloadID.length == 0) {
+        downloadID = NSUUID.UUID.UUIDString;
+        metadata[@"id"] = downloadID;
+    }
+    return downloadID;
+}
+
+- (NSString *)downloadResumeDataPathForID:(NSString *)downloadID {
+    NSString *safeID = downloadID.length ? downloadID : NSUUID.UUID.UUIDString;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"];
+    safeID = [[safeID componentsSeparatedByCharactersInSet:allowed.invertedSet] componentsJoinedByString:@"-"];
+    if (safeID.length == 0) safeID = NSUUID.UUID.UUIDString;
+    return [[self downloadResumeDataDirectoryPath] stringByAppendingPathComponent:
+            [safeID stringByAppendingPathExtension:@"resumeData"]];
+}
+
+- (NSString *)storeResumeData:(NSData *)resumeData forDownloadID:(NSString *)downloadID {
+    if (resumeData.length == 0 || downloadID.length == 0) return @"";
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    [fm createDirectoryAtPath:[self downloadResumeDataDirectoryPath]
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:&error];
+    if (error) return @"";
+
+    NSString *path = [self downloadResumeDataPathForID:downloadID];
+    if (![resumeData writeToFile:path options:NSDataWritingAtomic error:&error]) {
+        NSLog(@"Could not write download resume data: %@", error.localizedDescription);
+        return @"";
+    }
+    return path;
+}
+
+- (void)removeDownloadResumeDataAtPath:(NSString *)path {
+    if (path.length == 0) return;
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+}
+
+- (NSDictionary<NSString *, id> *)downloadProgressPayloadForDownload:(WKDownload *)download {
+    NSProgress *progress = [(id<NSProgressReporting>)download progress];
+    double fraction = progress.fractionCompleted;
+    BOOL indeterminate = progress.isIndeterminate || !(fraction >= 0.0) || fraction > 1.0;
+    if (indeterminate) fraction = 0.0;
+
+    NSString *detail = progress.localizedAdditionalDescription.length
+        ? progress.localizedAdditionalDescription
+        : progress.localizedDescription;
+    NSString *progressText = indeterminate
+        ? (detail.length ? detail : @"Downloading")
+        : [NSString stringWithFormat:@"Downloading %.0f%%", fraction * 100.0];
+
+    return @{
+        @"progress": @(fraction),
+        @"progressIndeterminate": @(indeterminate),
+        @"progressText": progressText ?: @"Downloading"
+    };
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)activeDownloadEntries {
+    if (self.activeDownloads.count == 0) return @[];
+    if (!self.downloadMetadata) self.downloadMetadata = [NSMapTable strongToStrongObjectsMapTable];
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray arrayWithCapacity:self.activeDownloads.count];
+    for (WKDownload *download in self.activeDownloads) {
+        NSMutableDictionary<NSString *, id> *metadata = [self.downloadMetadata objectForKey:download];
+        if (!metadata) {
+            metadata = [@{
+                @"timestamp": [[self historyDateFormatter] stringFromDate:[NSDate date]],
+                @"status": @"started"
+            } mutableCopy];
+            [self.downloadMetadata setObject:metadata forKey:download];
+        }
+
+        NSString *downloadID = [self downloadIDForMetadata:metadata];
+        NSString *path = [metadata[@"path"] isKindOfClass:NSString.class] ? metadata[@"path"] : @"";
+        NSString *filename = [metadata[@"filename"] isKindOfClass:NSString.class] ? metadata[@"filename"] : @"";
+        NSURL *sourceURL = download.originalRequest.URL;
+        if (filename.length == 0) filename = sourceURL.lastPathComponent.length ? sourceURL.lastPathComponent : path.lastPathComponent;
+        if (filename.length == 0) filename = @"download";
+
+        NSMutableDictionary<NSString *, id> *entry = [@{
+            @"id": downloadID,
+            @"timestamp": [metadata[@"timestamp"] isKindOfClass:NSString.class] ? metadata[@"timestamp"] : @"",
+            @"filename": filename,
+            @"path": path ?: @"",
+            @"status": [metadata[@"status"] isKindOfClass:NSString.class] ? metadata[@"status"] : @"started",
+            @"active": @YES,
+            @"sourceURL": sourceURL.absoluteString ?: @""
+        } mutableCopy];
+        [entry addEntriesFromDictionary:[self downloadProgressPayloadForDownload:download]];
+        [entries addObject:entry];
+    }
+
+    [entries sortUsingDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"timestamp" ascending:NO]]];
+    return entries;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)settingsDownloadEntries {
+    NSArray<NSDictionary<NSString *, id> *> *downloads = [self JSONLinesAtPath:[self downloadsFilePath] newestFirst:YES];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [[self activeDownloadEntries] mutableCopy];
+    NSMutableSet<NSString *> *seenIDs = [NSMutableSet set];
+    for (NSDictionary<NSString *, id> *entry in entries) {
+        NSString *downloadID = [entry[@"id"] isKindOfClass:NSString.class] ? entry[@"id"] : @"";
+        if (downloadID.length > 0) [seenIDs addObject:downloadID];
+    }
+
+    for (NSDictionary<NSString *, id> *entry in downloads) {
+        NSString *downloadID = [entry[@"id"] isKindOfClass:NSString.class] ? entry[@"id"] : @"";
+        if (downloadID.length > 0 && [seenIDs containsObject:downloadID]) continue;
+
+        NSString *path = [entry[@"path"] isKindOfClass:NSString.class] ? entry[@"path"] : @"";
+        NSString *filename = [entry[@"filename"] isKindOfClass:NSString.class] ? entry[@"filename"] : path.lastPathComponent;
+        if (filename.length == 0 && path.length == 0) continue;
+
+        NSString *resumeDataPath = [entry[@"resumeDataPath"] isKindOfClass:NSString.class] ? entry[@"resumeDataPath"] : @"";
+        BOOL hasResumeData = resumeDataPath.length > 0 &&
+                             [[NSFileManager defaultManager] fileExistsAtPath:resumeDataPath];
+
+        NSMutableDictionary<NSString *, id> *clean = [@{
+            @"id": downloadID ?: @"",
+            @"timestamp": [entry[@"timestamp"] isKindOfClass:NSString.class] ? entry[@"timestamp"] : @"",
+            @"filename": filename ?: @"",
+            @"path": path ?: @"",
+            @"status": [entry[@"status"] isKindOfClass:NSString.class] ? entry[@"status"] : @"",
+            @"error": [entry[@"error"] isKindOfClass:NSString.class] ? entry[@"error"] : @"",
+            @"active": @NO
+        } mutableCopy];
+        if (hasResumeData) clean[@"resumeDataPath"] = resumeDataPath;
+        [entries addObject:clean];
+        if (downloadID.length > 0) [seenIDs addObject:downloadID];
+    }
+    return entries;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)recentDownloadEntriesLimitedTo:(NSUInteger)limit {
+    NSArray<NSDictionary<NSString *, id> *> *entries = [self settingsDownloadEntries];
+    if (entries.count <= limit) return entries;
+    return [entries subarrayWithRange:NSMakeRange(0, limit)];
+}
+
+- (NSString *)settingsDownloadsScript {
+    NSArray<NSDictionary<NSString *, id> *> *downloads = [self settingsDownloadEntries];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:downloads options:0 error:nil];
+    NSString *jsonString = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"[]";
+    return [NSString stringWithFormat:@"<script>window.__tbDownloads=%@;</script></head>", jsonString ?: @"[]"];
+}
+
+- (void)clearDownloadHistory {
+    [[NSFileManager defaultManager] removeItemAtPath:[self downloadsFilePath] error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:[self downloadResumeDataDirectoryPath] error:NULL];
+    [self writeBrowserStateRunning:YES];
+}
+
+- (void)revealDownloadAtPath:(NSString *)path {
+    if (path.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        NSBeep();
+        return;
+    }
+    NSURL *url = [NSURL fileURLWithPath:path];
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ url ]];
+}
+
+- (void)recordDownloadEntry:(NSDictionary<NSString *, id> *)entry {
+    if (entry.count == 0) return;
+    [self appendJSONLine:entry toPath:[self downloadsFilePath]];
+    [self writeBrowserStateRunning:YES];
+}
+
+- (NSDictionary<NSString *, id> *)downloadLogEntryWithID:(NSString *)downloadID {
+    if (downloadID.length == 0) return nil;
+    for (NSDictionary<NSString *, id> *entry in [self JSONLinesAtPath:[self downloadsFilePath] newestFirst:YES]) {
+        NSString *candidate = [entry[@"id"] isKindOfClass:NSString.class] ? entry[@"id"] : @"";
+        if ([candidate isEqualToString:downloadID]) return entry;
+    }
+    return nil;
+}
+
+- (WKDownload *)activeDownloadWithID:(NSString *)downloadID {
+    if (downloadID.length == 0) return nil;
+    for (WKDownload *download in self.activeDownloads) {
+        NSDictionary<NSString *, id> *metadata = [self.downloadMetadata objectForKey:download];
+        NSString *candidate = [metadata[@"id"] isKindOfClass:NSString.class] ? metadata[@"id"] : @"";
+        if ([candidate isEqualToString:downloadID]) return download;
+    }
+    return nil;
+}
+
+- (void)reloadSettingsIfVisible {
+    if (self.webView && [self isSettingsURLString:self.webView.URL.absoluteString]) {
+        [self loadNativeSettingsPageInWebView:self.webView];
+    }
+}
+
+- (void)refreshDownloadsPopoverIfOpen {
+    if (!self.downloadsPopover.shown || !self.downloadsPopover.contentViewController) return;
+    self.downloadsPopover.contentViewController.view = [self downloadsPopoverContentView];
+}
+
+- (void)downloadRefreshTimerFired:(NSTimer *)timer {
+    (void)timer;
+    if (self.activeDownloads.count == 0) {
+        [self.downloadRefreshTimer invalidate];
+        self.downloadRefreshTimer = nil;
+        return;
+    }
+    [self updateDownloadsButton];
+    [self refreshDownloadsPopoverIfOpen];
+}
+
+- (void)startDownloadRefreshTimerIfNeeded {
+    if (self.downloadRefreshTimer || self.activeDownloads.count == 0) return;
+    NSTimer *timer = [NSTimer timerWithTimeInterval:0.75
+                                             target:self
+                                           selector:@selector(downloadRefreshTimerFired:)
+                                           userInfo:nil
+                                            repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+    self.downloadRefreshTimer = timer;
+}
+
+- (void)stopDownloadRefreshTimerIfIdle {
+    if (self.activeDownloads.count > 0) return;
+    [self.downloadRefreshTimer invalidate];
+    self.downloadRefreshTimer = nil;
+}
+
+- (void)cancelDownloadWithID:(NSString *)downloadID {
+    WKDownload *download = [self activeDownloadWithID:downloadID];
+    if (!download) {
+        NSBeep();
+        return;
+    }
+
+    NSMutableDictionary<NSString *, id> *metadata = [self.downloadMetadata objectForKey:download];
+    if (!metadata) {
+        metadata = [@{ @"timestamp": [[self historyDateFormatter] stringFromDate:[NSDate date]] } mutableCopy];
+        [self.downloadMetadata setObject:metadata forKey:download];
+    }
+    metadata[@"status"] = @"canceling";
+    [self setStatusText:@"Canceling download"];
+    [self updateDownloadsButton];
+    [self refreshDownloadsPopoverIfOpen];
+    [self reloadSettingsIfVisible];
+
+    [download cancel:^(NSData *resumeData) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSMutableDictionary<NSString *, id> *entry = [[self.downloadMetadata objectForKey:download] mutableCopy] ?: [metadata mutableCopy];
+            NSString *stableID = [self downloadIDForMetadata:entry];
+            entry[@"timestamp"] = entry[@"timestamp"] ?: [[self historyDateFormatter] stringFromDate:[NSDate date]];
+            entry[@"status"] = @"canceled";
+            entry[@"error"] = @"Canceled";
+            if (![entry[@"filename"] isKindOfClass:NSString.class]) entry[@"filename"] = @"download";
+
+            [entry removeObjectForKey:@"resumeDataPath"];
+            NSString *resumePath = [self storeResumeData:resumeData forDownloadID:stableID];
+            if (resumePath.length > 0) entry[@"resumeDataPath"] = resumePath;
+
+            [self recordDownloadEntry:entry];
+            [self.downloadMetadata removeObjectForKey:download];
+            [self.activeDownloads removeObject:download];
+            [self setStatusText:resumePath.length > 0 ? @"Download canceled, can resume" : @"Download canceled"];
+            [self updateDownloadsButton];
+            [self stopDownloadRefreshTimerIfIdle];
+            [self refreshDownloadsPopoverIfOpen];
+            [self reloadSettingsIfVisible];
+        });
+    }];
+}
+
+- (void)resumeDownloadWithID:(NSString *)downloadID {
+    if (@available(macOS 11.3, *)) {
+        NSDictionary<NSString *, id> *entry = [self downloadLogEntryWithID:downloadID];
+        NSString *resumeDataPath = [entry[@"resumeDataPath"] isKindOfClass:NSString.class] ? entry[@"resumeDataPath"] : @"";
+        NSData *resumeData = resumeDataPath.length ? [NSData dataWithContentsOfFile:resumeDataPath] : nil;
+        if (resumeData.length == 0) {
+            [self setStatusText:@"Download cannot be resumed"];
+            NSBeep();
+            return;
+        }
+
+        BrowserTab *tab = [self activeTab];
+        WKWebView *webView = self.webView ?: (tab ? [self ensureWebViewForTab:tab] : nil);
+        if (!webView) {
+            [self setStatusText:@"No web view available to resume download"];
+            NSBeep();
+            return;
+        }
+
+        [self setStatusText:@"Resuming download"];
+        [webView resumeDownloadFromResumeData:resumeData completionHandler:^(WKDownload *download) {
+            if (!download) {
+                [self setStatusText:@"Download cannot be resumed"];
+                NSBeep();
+                return;
+            }
+            if (!self.downloadMetadata) self.downloadMetadata = [NSMapTable strongToStrongObjectsMapTable];
+            NSMutableDictionary<NSString *, id> *metadata = [@{
+                @"id": downloadID ?: NSUUID.UUID.UUIDString,
+                @"timestamp": [[self historyDateFormatter] stringFromDate:[NSDate date]],
+                @"status": @"resuming",
+                @"filename": [entry[@"filename"] isKindOfClass:NSString.class] ? entry[@"filename"] : @"download",
+                @"path": [entry[@"path"] isKindOfClass:NSString.class] ? entry[@"path"] : @"",
+                @"resumeDataPath": resumeDataPath ?: @""
+            } mutableCopy];
+            [self.downloadMetadata setObject:metadata forKey:download];
+            [self trackDownload:download];
+            [self refreshDownloadsPopoverIfOpen];
+            [self reloadSettingsIfVisible];
+        }];
+    } else {
+        [self setStatusText:@"Resume downloads requires macOS 11.3+"];
+        NSBeep();
+    }
+}
+
+- (NSView *)bookmarkPopoverRowForEntry:(NSDictionary<NSString *, id> *)entry {
+    NSView *row = [[NSView alloc] initWithFrame:NSZeroRect];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+
+    NSString *titleText = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+    NSString *urlString = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+    if (titleText.length == 0) titleText = [entry[@"host"] isKindOfClass:NSString.class] ? entry[@"host"] : urlString;
+
+    NSTextField *title = [self popoverLabelWithString:titleText
+                                                 font:[NSFont systemFontOfSize:12.5 weight:NSFontWeightSemibold]
+                                                color:TBText()];
+    [row addSubview:title];
+
+    NSTextField *subtitle = [self popoverLabelWithString:urlString
+                                                    font:[NSFont systemFontOfSize:11.0 weight:NSFontWeightRegular]
+                                                   color:TBFaint()];
+    [row addSubview:subtitle];
+
+    NSButton *open = [self popoverButtonWithTitle:@"Open" action:@selector(openBookmarkFromPopover:)];
+    open.identifier = urlString;
+    [row addSubview:open];
+
+    NSButton *remove = [self popoverButtonWithTitle:@"Remove" action:@selector(removeBookmarkFromPopover:)];
+    remove.identifier = urlString;
+    [row addSubview:remove];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [row.heightAnchor constraintEqualToConstant:54.0],
+        [title.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+        [title.trailingAnchor constraintEqualToAnchor:open.leadingAnchor constant:-10.0],
+        [title.topAnchor constraintEqualToAnchor:row.topAnchor constant:7.0],
+        [subtitle.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+        [subtitle.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
+        [subtitle.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:2.0],
+        [remove.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+        [remove.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [remove.widthAnchor constraintEqualToConstant:72.0],
+        [open.trailingAnchor constraintEqualToAnchor:remove.leadingAnchor constant:-6.0],
+        [open.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [open.widthAnchor constraintEqualToConstant:54.0]
+    ]];
+
+    return row;
+}
+
+- (NSView *)bookmarksPopoverContentView {
+    NSView *content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 390, 340)];
+    content.translatesAutoresizingMaskIntoConstraints = NO;
+    content.wantsLayer = YES;
+    content.layer.backgroundColor = TBSurface().CGColor;
+
+    NSTextField *title = [self popoverLabelWithString:@"Bookmarks"
+                                                 font:[NSFont systemFontOfSize:14.0 weight:NSFontWeightSemibold]
+                                                color:TBText()];
+    [content addSubview:title];
+
+    NSArray<NSDictionary<NSString *, id> *> *bookmarks = [self recentBookmarkEntriesLimitedTo:6];
+    NSString *countText = bookmarks.count == 1 ? @"1 saved" : [NSString stringWithFormat:@"%lu saved", (unsigned long)[self bookmarkEntries].count];
+    NSTextField *status = [self popoverLabelWithString:countText
+                                                  font:[NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium]
+                                                 color:TBFaint()];
+    status.alignment = NSTextAlignmentRight;
+    [content addSubview:status];
+
+    NSStackView *stack = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+    stack.alignment = NSLayoutAttributeLeading;
+    stack.distribution = NSStackViewDistributionFill;
+    stack.spacing = 4.0;
+    [content addSubview:stack];
+
+    if (bookmarks.count == 0) {
+        NSTextField *empty = [self popoverLabelWithString:@"No bookmarks yet."
+                                                     font:[NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular]
+                                                    color:TBFaint()];
+        [stack addArrangedSubview:empty];
+        [empty.widthAnchor constraintEqualToConstant:356.0].active = YES;
+        [empty.heightAnchor constraintEqualToConstant:48.0].active = YES;
+    } else {
+        for (NSDictionary<NSString *, id> *entry in bookmarks) {
+            NSView *row = [self bookmarkPopoverRowForEntry:entry];
+            [stack addArrangedSubview:row];
+            [row.widthAnchor constraintEqualToConstant:356.0].active = YES;
+        }
+    }
+
+    NSButton *manage = [self popoverButtonWithTitle:@"Manage Bookmarks" action:@selector(openBookmarksSettings:)];
+    [content addSubview:manage];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [content.widthAnchor constraintEqualToConstant:390.0],
+        [content.heightAnchor constraintEqualToConstant:340.0],
+        [title.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:16.0],
+        [title.topAnchor constraintEqualToAnchor:content.topAnchor constant:14.0],
+        [status.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-16.0],
+        [status.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
+        [status.leadingAnchor constraintGreaterThanOrEqualToAnchor:title.trailingAnchor constant:12.0],
+        [stack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:16.0],
+        [stack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-16.0],
+        [stack.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:12.0],
+        [manage.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:16.0],
+        [manage.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-16.0],
+        [manage.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-12.0],
+        [stack.bottomAnchor constraintLessThanOrEqualToAnchor:manage.topAnchor constant:-10.0]
+    ]];
+
+    return content;
+}
+
+- (void)showBookmarksPopover:(id)sender {
+    (void)sender;
+    if (self.bookmarksPopover.shown) {
+        [self.bookmarksPopover close];
+        return;
+    }
+
+    NSPopover *popover = [[NSPopover alloc] init];
+    popover.behavior = NSPopoverBehaviorTransient;
+    popover.animates = YES;
+    NSViewController *controller = [[NSViewController alloc] init];
+    controller.view = [self bookmarksPopoverContentView];
+    popover.contentViewController = controller;
+    self.bookmarksPopover = popover;
+    [popover showRelativeToRect:self.bookmarksButton.bounds
+                         ofView:self.bookmarksButton
+                  preferredEdge:NSMinYEdge];
+}
+
+- (void)openBookmarkFromPopover:(id)sender {
+    NSString *urlString = [sender respondsToSelector:@selector(identifier)] ? [sender identifier] : @"";
+    if (urlString.length == 0) return;
+    [self.bookmarksPopover close];
+    [self loadURLString:urlString];
+}
+
+- (void)removeBookmarkFromPopover:(id)sender {
+    NSString *urlString = [sender respondsToSelector:@selector(identifier)] ? [sender identifier] : @"";
+    if (urlString.length == 0) return;
+    [self removeBookmarkForURLString:urlString];
+    [self.bookmarksPopover close];
+}
+
+- (void)openBookmarksSettings:(id)sender {
+    (void)sender;
+    [self.bookmarksPopover close];
+    [self openSettings:nil];
+}
+
+- (void)updateDownloadsButton {
+    BOOL active = self.activeDownloads.count > 0;
+    self.downloadsButton.toolTip = active
+        ? [NSString stringWithFormat:@"%lu download%@ active",
+           (unsigned long)self.activeDownloads.count,
+           self.activeDownloads.count == 1 ? @"" : @"s"]
+        : @"Downloads";
+    if ([self.downloadsButton isKindOfClass:TBFlatButton.class]) {
+        ((TBFlatButton *)self.downloadsButton).active = active;
+    }
+    if (@available(macOS 11.0, *)) {
+        NSString *symbol = active ? @"arrow.down.circle.fill" : @"arrow.down.circle";
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:self.downloadsButton.toolTip];
+        image.template = YES;
+        self.downloadsButton.image = image;
+    }
+    if (@available(macOS 10.14, *)) {
+        self.downloadsButton.contentTintColor = active ? TBAccent() : TBMuted();
+    }
+}
+
+- (NSTextField *)popoverLabelWithString:(NSString *)string
+                                   font:(NSFont *)font
+                                  color:(NSColor *)color {
+    NSTextField *label = [NSTextField labelWithString:string ?: @""];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.font = font;
+    label.textColor = color;
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    label.maximumNumberOfLines = 1;
+    return label;
+}
+
+- (NSButton *)popoverButtonWithTitle:(NSString *)title action:(SEL)action {
+    TBFlatButton *button = [[TBFlatButton alloc] initWithFrame:NSZeroRect];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.cornerRadius = 7.0;
+    button.target = self;
+    button.action = action;
+    button.bordered = NO;
+    button.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: TBText()
+    }];
+    [button.heightAnchor constraintEqualToConstant:28.0].active = YES;
+    return button;
+}
+
+- (NSView *)downloadPopoverRowForEntry:(NSDictionary<NSString *, id> *)entry {
+    NSView *row = [[NSView alloc] initWithFrame:NSZeroRect];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+
+    NSString *downloadID = [entry[@"id"] isKindOfClass:NSString.class] ? entry[@"id"] : @"";
+    NSString *filename = [entry[@"filename"] isKindOfClass:NSString.class] ? entry[@"filename"] : @"download";
+    NSString *path = [entry[@"path"] isKindOfClass:NSString.class] ? entry[@"path"] : @"";
+    NSString *status = [entry[@"status"] isKindOfClass:NSString.class] ? entry[@"status"] : @"";
+    BOOL active = [entry[@"active"] respondsToSelector:@selector(boolValue)] && [entry[@"active"] boolValue];
+    NSString *resumeDataPath = [entry[@"resumeDataPath"] isKindOfClass:NSString.class] ? entry[@"resumeDataPath"] : @"";
+    BOOL canResume = downloadID.length > 0 && resumeDataPath.length > 0;
+    NSString *detail = @"";
+    if (active) {
+        detail = [entry[@"progressText"] isKindOfClass:NSString.class] ? entry[@"progressText"] : @"Downloading";
+    } else if ([status isEqualToString:@"failed"] || [status isEqualToString:@"canceled"]) {
+        detail = [entry[@"error"] isKindOfClass:NSString.class] ? entry[@"error"] : ([status isEqualToString:@"canceled"] ? @"Canceled" : @"Download failed");
+    } else {
+        detail = path.length ? path.stringByAbbreviatingWithTildeInPath : status;
+    }
+
+    NSTextField *title = [self popoverLabelWithString:filename
+                                                 font:[NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium]
+                                                color:TBText()];
+    [row addSubview:title];
+
+    NSTextField *subtitle = [self popoverLabelWithString:detail
+                                                    font:[NSFont systemFontOfSize:11.0 weight:NSFontWeightRegular]
+                                                   color:TBFaint()];
+    [row addSubview:subtitle];
+
+    NSStackView *actions = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    actions.translatesAutoresizingMaskIntoConstraints = NO;
+    actions.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    actions.alignment = NSLayoutAttributeCenterY;
+    actions.distribution = NSStackViewDistributionFill;
+    actions.spacing = 6.0;
+    [row addSubview:actions];
+
+    if (active) {
+        NSButton *cancel = [self popoverButtonWithTitle:@"Cancel" action:@selector(cancelDownloadFromPopover:)];
+        cancel.identifier = downloadID;
+        cancel.enabled = ![status isEqualToString:@"canceling"];
+        [actions addArrangedSubview:cancel];
+        [cancel.widthAnchor constraintEqualToConstant:68.0].active = YES;
+    } else if (canResume) {
+        NSButton *resume = [self popoverButtonWithTitle:@"Resume" action:@selector(resumeDownloadFromPopover:)];
+        resume.identifier = downloadID;
+        [actions addArrangedSubview:resume];
+        [resume.widthAnchor constraintEqualToConstant:68.0].active = YES;
+    } else {
+        NSButton *reveal = [self popoverButtonWithTitle:@"Reveal" action:@selector(revealDownloadFromPopover:)];
+        reveal.identifier = path;
+        reveal.enabled = path.length > 0 && [status isEqualToString:@"complete"];
+        [actions addArrangedSubview:reveal];
+        [reveal.widthAnchor constraintEqualToConstant:64.0].active = YES;
+    }
+
+    NSProgressIndicator *progress = nil;
+    if (active) {
+        progress = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+        progress.translatesAutoresizingMaskIntoConstraints = NO;
+        progress.style = NSProgressIndicatorStyleBar;
+        progress.controlSize = NSControlSizeSmall;
+        progress.minValue = 0.0;
+        progress.maxValue = 1.0;
+        progress.indeterminate = [entry[@"progressIndeterminate"] respondsToSelector:@selector(boolValue)] &&
+                                 [entry[@"progressIndeterminate"] boolValue];
+        if (!progress.indeterminate && [entry[@"progress"] respondsToSelector:@selector(doubleValue)]) {
+            progress.doubleValue = [entry[@"progress"] doubleValue];
+        } else {
+            [progress startAnimation:nil];
+        }
+        [row addSubview:progress];
+    }
+
+    NSMutableArray<NSLayoutConstraint *> *constraints = [@[
+        [row.heightAnchor constraintEqualToConstant:active ? 62.0 : 50.0],
+        [title.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+        [title.trailingAnchor constraintEqualToAnchor:actions.leadingAnchor constant:-10.0],
+        [title.topAnchor constraintEqualToAnchor:row.topAnchor constant:7.0],
+        [subtitle.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+        [subtitle.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
+        [subtitle.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:2.0],
+        [actions.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+        [actions.centerYAnchor constraintEqualToAnchor:row.centerYAnchor]
+    ] mutableCopy];
+    if (progress) {
+        [constraints addObjectsFromArray:@[
+            [progress.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+            [progress.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
+            [progress.topAnchor constraintEqualToAnchor:subtitle.bottomAnchor constant:6.0],
+            [progress.heightAnchor constraintEqualToConstant:3.0]
+        ]];
+    }
+    [NSLayoutConstraint activateConstraints:constraints];
+
+    return row;
+}
+
+- (NSView *)downloadsPopoverContentView {
+    NSView *content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 360, 320)];
+    content.translatesAutoresizingMaskIntoConstraints = NO;
+    content.wantsLayer = YES;
+    content.layer.backgroundColor = TBSurface().CGColor;
+
+    NSTextField *title = [self popoverLabelWithString:@"Downloads"
+                                                 font:[NSFont systemFontOfSize:14.0 weight:NSFontWeightSemibold]
+                                                color:TBText()];
+    [content addSubview:title];
+
+    NSString *activeText = self.activeDownloads.count > 0
+        ? [NSString stringWithFormat:@"%lu active", (unsigned long)self.activeDownloads.count]
+        : @"Recent files";
+    NSTextField *status = [self popoverLabelWithString:activeText
+                                                  font:[NSFont systemFontOfSize:11.0 weight:NSFontWeightMedium]
+                                                 color:self.activeDownloads.count > 0 ? TBAccent() : TBFaint()];
+    status.alignment = NSTextAlignmentRight;
+    [content addSubview:status];
+
+    NSStackView *stack = [[NSStackView alloc] initWithFrame:NSZeroRect];
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+    stack.alignment = NSLayoutAttributeLeading;
+    stack.distribution = NSStackViewDistributionFill;
+    stack.spacing = 4.0;
+    [content addSubview:stack];
+
+    NSArray<NSDictionary<NSString *, id> *> *downloads = [self recentDownloadEntriesLimitedTo:5];
+    if (downloads.count == 0) {
+        NSTextField *empty = [self popoverLabelWithString:@"No downloads yet."
+                                                     font:[NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular]
+                                                    color:TBFaint()];
+        [stack addArrangedSubview:empty];
+        [empty.widthAnchor constraintEqualToConstant:326.0].active = YES;
+        [empty.heightAnchor constraintEqualToConstant:44.0].active = YES;
+    } else {
+        for (NSDictionary<NSString *, id> *entry in downloads) {
+            NSView *row = [self downloadPopoverRowForEntry:entry];
+            [stack addArrangedSubview:row];
+            [row.widthAnchor constraintEqualToConstant:326.0].active = YES;
+        }
+    }
+
+    NSButton *openSettings = [self popoverButtonWithTitle:@"Open Downloads" action:@selector(openDownloadsSettings:)];
+    [content addSubview:openSettings];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [content.widthAnchor constraintEqualToConstant:360.0],
+        [content.heightAnchor constraintEqualToConstant:320.0],
+        [title.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:16.0],
+        [title.topAnchor constraintEqualToAnchor:content.topAnchor constant:14.0],
+        [status.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-16.0],
+        [status.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
+        [status.leadingAnchor constraintGreaterThanOrEqualToAnchor:title.trailingAnchor constant:12.0],
+        [stack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:16.0],
+        [stack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-16.0],
+        [stack.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:12.0],
+        [openSettings.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:16.0],
+        [openSettings.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-16.0],
+        [openSettings.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-12.0],
+        [stack.bottomAnchor constraintLessThanOrEqualToAnchor:openSettings.topAnchor constant:-10.0]
+    ]];
+
+    return content;
+}
+
+- (void)showDownloadsPopover:(id)sender {
+    (void)sender;
+    if (self.downloadsPopover.shown) {
+        [self.downloadsPopover close];
+        return;
+    }
+
+    NSPopover *popover = [[NSPopover alloc] init];
+    popover.behavior = NSPopoverBehaviorTransient;
+    popover.animates = YES;
+    NSViewController *controller = [[NSViewController alloc] init];
+    controller.view = [self downloadsPopoverContentView];
+    popover.contentViewController = controller;
+    self.downloadsPopover = popover;
+    [popover showRelativeToRect:self.downloadsButton.bounds
+                         ofView:self.downloadsButton
+                  preferredEdge:NSMinYEdge];
+}
+
+- (void)revealDownloadFromPopover:(id)sender {
+    NSString *path = [sender respondsToSelector:@selector(identifier)] ? [sender identifier] : @"";
+    [self revealDownloadAtPath:path];
+}
+
+- (void)cancelDownloadFromPopover:(id)sender {
+    NSString *downloadID = [sender respondsToSelector:@selector(identifier)] ? [sender identifier] : @"";
+    [self cancelDownloadWithID:downloadID];
+}
+
+- (void)resumeDownloadFromPopover:(id)sender {
+    NSString *downloadID = [sender respondsToSelector:@selector(identifier)] ? [sender identifier] : @"";
+    [self resumeDownloadWithID:downloadID];
+}
+
+- (void)openDownloadsSettings:(id)sender {
+    (void)sender;
+    [self.downloadsPopover close];
+    [self openSettings:nil];
+}
+
+- (void)updateBookmarkButton {
+    NSString *urlString = [self bookmarkURLStringForCurrentPage];
+    BOOL bookmarkable = urlString.length > 0;
+    BOOL bookmarked = bookmarkable && [self isURLStringBookmarked:urlString];
+    self.bookmarkButton.enabled = bookmarkable;
+    self.bookmarkButton.toolTip = bookmarked ? @"Remove bookmark" : @"Bookmark this page";
+    if ([self.bookmarkButton isKindOfClass:TBFlatButton.class]) {
+        ((TBFlatButton *)self.bookmarkButton).active = NO;
+    }
+    if (@available(macOS 11.0, *)) {
+        NSString *symbol = bookmarked ? @"star.fill" : @"star";
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:self.bookmarkButton.toolTip];
+        image.template = YES;
+        self.bookmarkButton.image = image;
+    }
+    if (@available(macOS 10.14, *)) {
+        self.bookmarkButton.contentTintColor = bookmarked ? TBAccent() : TBMuted();
+    }
 }
 
 - (void)toggleSidebar:(id)sender {
@@ -1579,6 +4422,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             self.sidebar.hidden = YES;
             self.sidebarSeparator.hidden = YES;
         }
+        if (!self.restoringSession) [self writeBrowserStateRunning:YES];
     }];
     [self updateControls];
 }
@@ -1608,6 +4452,188 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
 }
 
+- (NSString *)safeFilenameFromString:(NSString *)string fallback:(NSString *)fallback extension:(NSString *)extension {
+    NSString *name = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (name.length == 0) name = fallback.length ? fallback : @"Page";
+    NSCharacterSet *bad = [NSCharacterSet characterSetWithCharactersInString:@"/:\\?%*|\"<>"];
+    name = [[name componentsSeparatedByCharactersInSet:bad] componentsJoinedByString:@"-"];
+    name = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (name.length == 0) name = fallback.length ? fallback : @"Page";
+    if (extension.length == 0) return name;
+    return [[name stringByDeletingPathExtension] stringByAppendingPathExtension:extension];
+}
+
+- (void)openFile:(id)sender {
+    (void)sender;
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = YES;
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = YES;
+    panel.title = @"Open File";
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        if (result != NSModalResponseOK) return;
+        NSArray<NSURL *> *urls = panel.URLs;
+        BOOL privateBrowsing = [self activeTab].privateBrowsing;
+        for (NSUInteger i = 0; i < urls.count; i++) {
+            if (privateBrowsing) {
+                [self newPrivateTabWithURLString:urls[i].absoluteString select:(i == urls.count - 1)];
+            } else {
+                [self newTabWithURLString:urls[i].absoluteString select:(i == urls.count - 1)];
+            }
+        }
+    }];
+}
+
+- (void)printPage:(id)sender {
+    (void)sender;
+    if (!self.webView) {
+        NSBeep();
+        return;
+    }
+    if (@available(macOS 11.0, *)) {
+        NSPrintOperation *operation = [self.webView printOperationWithPrintInfo:NSPrintInfo.sharedPrintInfo];
+        [operation runOperationModalForWindow:self.window
+                                     delegate:nil
+                               didRunSelector:nil
+                                  contextInfo:NULL];
+    } else {
+        NSPrintOperation *operation = [NSPrintOperation printOperationWithView:self.webView
+                                                                     printInfo:NSPrintInfo.sharedPrintInfo];
+        [operation runOperationModalForWindow:self.window
+                                     delegate:nil
+                               didRunSelector:nil
+                                  contextInfo:NULL];
+    }
+}
+
+- (void)exportPageAsPDF:(id)sender {
+    (void)sender;
+    if (!self.webView) {
+        NSBeep();
+        return;
+    }
+
+    BrowserTab *tab = [self activeTab];
+    NSString *filename = [self safeFilenameFromString:(tab.title ?: self.webView.title)
+                                             fallback:@"TrailBrowser Page"
+                                            extension:@"pdf"];
+    NSSavePanel *panel = [NSSavePanel savePanel];
+    panel.title = @"Save Page as PDF";
+    panel.nameFieldStringValue = filename;
+    if (@available(macOS 11.0, *)) panel.allowedContentTypes = @[ UTTypePDF ];
+    panel.canCreateDirectories = YES;
+
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        if (result != NSModalResponseOK || !panel.URL) return;
+        NSURL *destination = panel.URL;
+        void (^writePDF)(NSData *) = ^(NSData *data) {
+            NSError *error = nil;
+            if (![data writeToURL:destination options:NSDataWritingAtomic error:&error]) {
+                [self setStatusText:error.localizedDescription ?: @"Could not save PDF"];
+                NSBeep();
+                return;
+            }
+            [self setStatusText:@"Saved PDF"];
+        };
+
+        if (@available(macOS 11.0, *)) {
+            [self.webView createPDFWithConfiguration:nil completionHandler:^(NSData *pdfDocumentData, NSError *error) {
+                if (!pdfDocumentData || error) {
+                    [self setStatusText:error.localizedDescription ?: @"Could not create PDF"];
+                    NSBeep();
+                    return;
+                }
+                writePDF(pdfDocumentData);
+            }];
+        } else {
+            NSData *data = [self.webView dataWithPDFInsideRect:self.webView.bounds];
+            writePDF(data ?: [NSData data]);
+        }
+    }];
+}
+
+- (NSString *)sourceViewerHTMLForURLString:(NSString *)urlString source:(NSString *)source {
+    NSString *escapedURL = [self htmlEscaped:urlString ?: @""];
+    NSString *escapedSource = [self htmlEscaped:source ?: @""];
+    return [NSString stringWithFormat:
+        @"<!doctype html><html><head><meta charset='utf-8'>"
+         "<title>View Source</title><style>"
+         ":root{color-scheme:dark}*{box-sizing:border-box}"
+         "body{margin:0;background:#0a0a0b;color:#f3f3f4;"
+         "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55}"
+         "header{position:sticky;top:0;padding:12px 18px;background:#161618;border-bottom:1px solid rgba(255,255,255,.09)}"
+         "h1{margin:0 0 3px;font:600 13px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif}"
+         "p{margin:0;color:#8a8a90;font:12px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+         "pre{margin:0;padding:18px;white-space:pre-wrap;word-break:break-word}"
+         "</style></head><body><header><h1>View Source</h1><p>%@</p></header><pre>%@</pre></body></html>",
+        escapedURL, escapedSource];
+}
+
+- (void)viewSource:(id)sender {
+    (void)sender;
+    if (!self.webView) {
+        NSBeep();
+        return;
+    }
+
+    NSString *urlString = self.webView.URL.absoluteString ?: [self activeTab].urlString ?: @"";
+    NSString *script = @"document.documentElement ? document.documentElement.outerHTML : ''";
+    [self.webView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+        if (error) {
+            [self setStatusText:error.localizedDescription ?: @"Could not read source"];
+            NSBeep();
+            return;
+        }
+        NSString *source = [result isKindOfClass:NSString.class] ? result : @"";
+        BOOL privateBrowsing = [self activeTab].privateBrowsing;
+        BrowserTab *tab = privateBrowsing
+            ? [self newPrivateTabWithURLString:@"" select:YES]
+            : [self newTabWithURLString:@"" select:YES];
+        tab.title = @"View Source";
+        tab.urlString = urlString.length ? [@"view-source:" stringByAppendingString:urlString] : @"view-source:";
+        tab.favicon = nil;
+        [tab.webView loadHTMLString:[self sourceViewerHTMLForURLString:urlString source:source] baseURL:nil];
+        [self syncAddressBarWithWebView];
+        [self reloadSidebarRowForTab:tab];
+        [self writeBrowserStateRunning:YES];
+    }];
+}
+
+- (CGFloat)currentPageZoom {
+    if (!self.webView) return 1.0;
+    if (@available(macOS 11.0, *)) {
+        return self.webView.pageZoom > 0 ? self.webView.pageZoom : 1.0;
+    }
+    return self.webView.magnification > 0 ? self.webView.magnification : 1.0;
+}
+
+- (void)setPageZoom:(CGFloat)zoom {
+    if (!self.webView) return;
+    CGFloat bounded = MIN(MAX(zoom, 0.5), 3.0);
+    if (@available(macOS 11.0, *)) {
+        self.webView.pageZoom = bounded;
+    } else {
+        self.webView.allowsMagnification = YES;
+        self.webView.magnification = bounded;
+    }
+    [self setStatusText:[NSString stringWithFormat:@"Zoom %.0f%%", bounded * 100.0]];
+}
+
+- (void)zoomIn:(id)sender {
+    (void)sender;
+    [self setPageZoom:[self currentPageZoom] + 0.1];
+}
+
+- (void)zoomOut:(id)sender {
+    (void)sender;
+    [self setPageZoom:[self currentPageZoom] - 0.1];
+}
+
+- (void)resetPageZoom:(id)sender {
+    (void)sender;
+    [self setPageZoom:1.0];
+}
+
 - (void)focusAddressBar:(id)sender {
     (void)sender;
     [self.window makeFirstResponder:self.addressField];
@@ -1619,6 +4645,17 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         self.userEditingAddress = YES;
         self.addressContainer.focused = YES;
         [self.addressContainer setNeedsDisplay:YES];
+        [self updateAddressSuggestions];
+    }
+}
+
+- (void)controlTextDidChange:(NSNotification *)notification {
+    if (notification.object == self.addressField) {
+        [self updateAddressSuggestions];
+        return;
+    }
+    if (notification.object == self.findField) {
+        [self runFindBackwards:NO];
     }
 }
 
@@ -1627,7 +4664,53 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         self.userEditingAddress = NO;
         self.addressContainer.focused = NO;
         [self.addressContainer setNeedsDisplay:YES];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![self isAddressFieldBeingEdited]) [self hideAddressSuggestionsPanel];
+        });
     }
+}
+
+- (BOOL)control:(NSControl *)control
+       textView:(NSTextView *)textView
+doCommandBySelector:(SEL)commandSelector {
+    (void)textView;
+    if (control == self.findField) {
+        if (commandSelector == @selector(cancelOperation:)) {
+            [self closeFindBar:nil];
+            return YES;
+        }
+        if (commandSelector == @selector(insertNewline:)) {
+            [self findNext:nil];
+            return YES;
+        }
+        return NO;
+    }
+
+    if (control != self.addressField) return NO;
+
+    if (commandSelector == @selector(moveDown:)) {
+        [self moveAddressSuggestionSelectionBy:1];
+        return YES;
+    }
+    if (commandSelector == @selector(moveUp:)) {
+        [self moveAddressSuggestionSelectionBy:-1];
+        return YES;
+    }
+    if (commandSelector == @selector(cancelOperation:)) {
+        [self hideAddressSuggestionsPanel];
+        return YES;
+    }
+    if (commandSelector == @selector(insertNewline:)) {
+        if (self.addressSuggestionIndex >= 0 &&
+            self.addressSuggestionIndex < (NSInteger)self.addressSuggestions.count) {
+            [self acceptAddressSuggestionAtIndex:self.addressSuggestionIndex];
+            return YES;
+        }
+        [self hideAddressSuggestionsPanel];
+        return NO;
+    }
+
+    return NO;
 }
 
 #pragma mark - Page assistant
@@ -2287,9 +5370,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (NSString *)subtitleForTab:(BrowserTab *)tab {
     NSURL *url = [NSURL URLWithString:tab.urlString ?: @""];
-    if (url.host.length > 0) return url.host;
-    if (tab.urlString.length > 0) return tab.urlString;
-    return @"New tab";
+    NSString *subtitle = nil;
+    if (url.host.length > 0) {
+        subtitle = url.host;
+    } else if (tab.urlString.length > 0) {
+        subtitle = tab.urlString;
+    } else {
+        subtitle = @"New tab";
+    }
+    return tab.privateBrowsing ? [@"Private - " stringByAppendingString:subtitle] : subtitle;
 }
 
 - (void)reloadSidebarRowForTab:(BrowserTab *)tab {
@@ -2298,6 +5387,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     [self.tabTable reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:index]
                              columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+    if (self.tabSwitcherVisible) [self refreshTabSwitcher];
 }
 
 - (BOOL)isHTTPURL:(NSURL *)url {
@@ -2414,7 +5504,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
         NSTextField *title = [NSTextField labelWithString:@""];
         title.translatesAutoresizingMaskIntoConstraints = NO;
-        title.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
+        title.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightRegular];
         title.lineBreakMode = NSLineBreakByTruncatingTail;
         title.maximumNumberOfLines = 1;
         [cell addSubview:title];
@@ -2489,12 +5579,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         if (@available(macOS 10.14, *)) cell.tabIconView.contentTintColor = nil;
     } else {
         if (@available(macOS 11.0, *)) {
-            NSImage *image = [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:@"Website"];
+            NSString *symbol = tab.privateBrowsing ? @"eye.slash" : @"globe";
+            NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:@"Website"];
             image.template = YES;
             cell.tabIconView.image = image;
         }
         if (@available(macOS 10.14, *)) {
-            cell.tabIconView.contentTintColor = selected ? TBAccent() : TBFaint();
+            cell.tabIconView.contentTintColor = (selected || tab.privateBrowsing) ? TBAccent() : TBFaint();
         }
     }
     return cell;
@@ -2632,12 +5723,22 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             return;
         }
 
-        NSString *message = [NSString stringWithFormat:
-                             @"Imported %lu cookie%@ from \"%@\".\n\n"
-                              "Reload the current page to use them.",
-                             (unsigned long)result.imported,
-                             result.imported == 1 ? @"" : @"s",
-                             profile.displayName];
+        NSMutableString *message = [NSMutableString stringWithFormat:
+                                    @"Imported %lu cookie%@ from \"%@\".",
+                                    (unsigned long)result.imported,
+                                    result.imported == 1 ? @"" : @"s",
+                                    profile.displayName];
+        if (result.skipped > 0) {
+            [message appendFormat:@" Skipped %lu stale or unreadable cookie%@.",
+             (unsigned long)result.skipped,
+             result.skipped == 1 ? @"" : @"s"];
+        }
+        if (result.decryptionFailures > 0) {
+            [message appendFormat:@" %lu encrypted cookie%@ could not be decrypted by the Chrome Safe Storage key.",
+             (unsigned long)result.decryptionFailures,
+             result.decryptionFailures == 1 ? @"" : @"s"];
+        }
+        [message appendString:@"\n\nReload the current page to use them."];
         [self showImportAlertWithStyle:NSAlertStyleInformational
                                  title:@"Cookies imported"
                                message:message];
@@ -2683,6 +5784,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     self.progressBar.hidden = !loading;
     if (!loading) self.progressBar.progress = 0.0;
+    [self updateBookmarkButton];
+    [self updateSiteInfoButton];
+    [self updateDownloadsButton];
 }
 
 - (void)syncAddressBarWithWebView {
@@ -2729,7 +5833,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     if (context == BrowserURLContext) {
         if (observedWebView) [self updateSidebarTitleForWebView:observedWebView];
-        if (observedWebView == self.webView) [self syncAddressBarWithWebView];
+        if (observedWebView == self.webView) {
+            [self syncAddressBarWithWebView];
+            [self updateBookmarkButton];
+            [self updateSiteInfoButton];
+        }
         return;
     }
 
@@ -2800,7 +5908,37 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
         }
     }
 
+    if (navigationAction.navigationType == WKNavigationTypeLinkActivated && [self isHTTPURL:url]) {
+        NSEventModifierFlags flags = navigationAction.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        BOOL commandClick = (flags & NSEventModifierFlagCommand) != 0;
+        BOOL middleClick = navigationAction.buttonNumber == 2;
+        if (commandClick || middleClick) {
+            BOOL selectNewTab = (flags & NSEventModifierFlagShift) != 0;
+            BrowserTab *sourceTab = [self tabForWebView:webView];
+            if (sourceTab.privateBrowsing) {
+                [self newPrivateTabWithURLString:url.absoluteString select:selectNewTab];
+            } else {
+                [self newTabWithURLString:url.absoluteString select:selectNewTab];
+            }
+            decisionHandler(WKNavigationActionPolicyCancel);
+            return;
+        }
+    }
+
     decisionHandler(WKNavigationActionPolicyAllow);
+}
+
+- (void)webView:(WKWebView *)webView
+decidePolicyForNavigationResponse:(WKNavigationResponse *)navigationResponse
+decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler {
+    (void)webView;
+    if (@available(macOS 11.3, *)) {
+        if (!navigationResponse.canShowMIMEType) {
+            decisionHandler(WKNavigationResponsePolicyDownload);
+            return;
+        }
+    }
+    decisionHandler(WKNavigationResponsePolicyAllow);
 }
 
 - (void)webView:(WKWebView *)webView
@@ -2817,10 +5955,210 @@ createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
     (void)windowFeatures;
 
     if (!navigationAction.targetFrame) {
-        BrowserTab *tab = [self newTabWithConfiguration:configuration URLString:nil select:YES];
+        BrowserTab *sourceTab = [self tabForWebView:webView];
+        NSEventModifierFlags flags = navigationAction.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        BOOL commandClick = (flags & NSEventModifierFlagCommand) != 0;
+        BOOL selectNewTab = !commandClick || (flags & NSEventModifierFlagShift);
+        if (sourceTab.privateBrowsing) {
+            configuration.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
+        }
+        BrowserTab *tab = [self newTabWithConfiguration:configuration
+                                              URLString:navigationAction.request.URL.absoluteString
+                                                 select:selectNewTab
+                                        privateBrowsing:sourceTab.privateBrowsing];
         return tab.webView;
     }
     return nil;
+}
+
+- (void)webView:(WKWebView *)webView
+requestMediaCapturePermissionForOrigin:(WKSecurityOrigin *)origin
+initiatedByFrame:(WKFrameInfo *)frame
+           type:(WKMediaCaptureType)type
+decisionHandler:(void (^)(WKPermissionDecision decision))decisionHandler {
+    NSString *originString = [self originStringForSecurityOrigin:origin] ?:
+                             [self originStringForSecurityOrigin:frame.securityOrigin] ?:
+                             [self originStringForURL:frame.request.URL];
+    NSString *displayOrigin = originString.length ? originString : @"This site";
+    NSArray<NSString *> *kinds = [self sitePermissionKindsForMediaCaptureType:type];
+    BrowserTab *tab = [self tabForWebView:webView];
+    BOOL privateBrowsing = tab.privateBrowsing;
+
+    if (!privateBrowsing && originString.length > 0) {
+        if ([self anySitePermissionKindDenied:kinds originString:originString]) {
+            decisionHandler(WKPermissionDecisionDeny);
+            return;
+        }
+        if ([self allSitePermissionKindsAllowed:kinds originString:originString]) {
+            decisionHandler(WKPermissionDecisionGrant);
+            return;
+        }
+    }
+
+    NSString *captureLabel = [self mediaCaptureLabelForType:type];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSAlertStyleInformational;
+    alert.messageText = [NSString stringWithFormat:@"Allow %@ access?", [captureLabel capitalizedString]];
+    alert.informativeText = privateBrowsing
+        ? [NSString stringWithFormat:@"%@ wants to use your %@. Private tabs do not save site permission choices.",
+           displayOrigin, captureLabel]
+        : [NSString stringWithFormat:@"%@ wants to use your %@.", displayOrigin, captureLabel];
+    [alert addButtonWithTitle:@"Allow"];
+    [alert addButtonWithTitle:@"Block"];
+
+    BOOL canRemember = !privateBrowsing && originString.length > 0;
+    if (canRemember) {
+        alert.showsSuppressionButton = YES;
+        alert.suppressionButton.title = @"Remember for this site";
+    }
+
+    void (^finish)(NSModalResponse) = ^(NSModalResponse response) {
+        WKPermissionDecision decision = response == NSAlertFirstButtonReturn
+            ? WKPermissionDecisionGrant
+            : WKPermissionDecisionDeny;
+        BOOL remember = canRemember && alert.suppressionButton.state == NSControlStateValueOn;
+        if (remember) {
+            NSString *value = decision == WKPermissionDecisionGrant ? TBSitePermissionAllow : TBSitePermissionDeny;
+            for (NSString *kind in kinds) {
+                [self setSitePermissionValue:value forOriginString:originString kind:kind];
+            }
+        }
+        decisionHandler(decision);
+    };
+
+    if (self.window) {
+        [alert beginSheetModalForWindow:self.window completionHandler:finish];
+    } else {
+        finish([alert runModal]);
+    }
+}
+
+#pragma mark - Downloads
+
+- (void)trackDownload:(WKDownload *)download {
+    if (!download) return;
+    if (!self.activeDownloads) self.activeDownloads = [NSMutableSet set];
+    if (!self.downloadMetadata) self.downloadMetadata = [NSMapTable strongToStrongObjectsMapTable];
+    download.delegate = self;
+    [self.activeDownloads addObject:download];
+    if (![self.downloadMetadata objectForKey:download]) {
+        NSMutableDictionary<NSString *, id> *metadata = [@{
+            @"timestamp": [[self historyDateFormatter] stringFromDate:[NSDate date]],
+            @"status": @"started"
+        } mutableCopy];
+        [self.downloadMetadata setObject:metadata forKey:download];
+    }
+    [self downloadIDForMetadata:[self.downloadMetadata objectForKey:download]];
+    [self setStatusText:@"Downloading"];
+    [self updateDownloadsButton];
+    [self startDownloadRefreshTimerIfNeeded];
+    [self refreshDownloadsPopoverIfOpen];
+}
+
+- (NSURL *)uniqueDownloadURLForSuggestedFilename:(NSString *)suggestedFilename {
+    NSString *filename = suggestedFilename.lastPathComponent;
+    if (filename.length == 0) filename = @"download";
+    NSCharacterSet *badChars = [NSCharacterSet characterSetWithCharactersInString:@"/:"];
+    filename = [[filename componentsSeparatedByCharactersInSet:badChars] componentsJoinedByString:@"-"];
+    if (filename.length == 0) filename = @"download";
+
+    NSURL *downloadsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDownloadsDirectory
+                                                                 inDomains:NSUserDomainMask].firstObject;
+    if (!downloadsURL) downloadsURL = [NSURL fileURLWithPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Downloads"]
+                                                 isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:downloadsURL
+                             withIntermediateDirectories:YES
+                                              attributes:nil
+                                                   error:nil];
+
+    NSString *extension = filename.pathExtension;
+    NSString *stem = filename.stringByDeletingPathExtension;
+    if (stem.length == 0) stem = @"download";
+    NSURL *candidate = [downloadsURL URLByAppendingPathComponent:filename isDirectory:NO];
+    NSInteger suffix = 2;
+    while ([[NSFileManager defaultManager] fileExistsAtPath:candidate.path]) {
+        NSString *copyName = extension.length
+            ? [NSString stringWithFormat:@"%@ %ld.%@", stem, (long)suffix, extension]
+            : [NSString stringWithFormat:@"%@ %ld", stem, (long)suffix];
+        candidate = [downloadsURL URLByAppendingPathComponent:copyName isDirectory:NO];
+        suffix += 1;
+    }
+    return candidate;
+}
+
+- (void)webView:(WKWebView *)webView
+navigationAction:(WKNavigationAction *)navigationAction
+didBecomeDownload:(WKDownload *)download {
+    (void)webView;
+    (void)navigationAction;
+    [self trackDownload:download];
+}
+
+- (void)webView:(WKWebView *)webView
+navigationResponse:(WKNavigationResponse *)navigationResponse
+didBecomeDownload:(WKDownload *)download {
+    (void)webView;
+    (void)navigationResponse;
+    [self trackDownload:download];
+}
+
+- (void)download:(WKDownload *)download
+decideDestinationUsingResponse:(NSURLResponse *)response
+suggestedFilename:(NSString *)suggestedFilename
+completionHandler:(void (^)(NSURL *destination))completionHandler {
+    (void)response;
+    NSURL *destination = [self uniqueDownloadURLForSuggestedFilename:suggestedFilename];
+    if (!self.downloadMetadata) self.downloadMetadata = [NSMapTable strongToStrongObjectsMapTable];
+    NSMutableDictionary<NSString *, id> *metadata = [self.downloadMetadata objectForKey:download];
+    if (!metadata) {
+        metadata = [@{ @"timestamp": [[self historyDateFormatter] stringFromDate:[NSDate date]] } mutableCopy];
+        [self.downloadMetadata setObject:metadata forKey:download];
+    }
+    metadata[@"filename"] = destination.lastPathComponent ?: suggestedFilename ?: @"download";
+    metadata[@"path"] = destination.path ?: @"";
+    metadata[@"status"] = @"started";
+    completionHandler(destination);
+    [self refreshDownloadsPopoverIfOpen];
+}
+
+- (void)downloadDidFinish:(WKDownload *)download {
+    NSMutableDictionary<NSString *, id> *metadata = [[self.downloadMetadata objectForKey:download] mutableCopy] ?: [NSMutableDictionary dictionary];
+    metadata[@"timestamp"] = metadata[@"timestamp"] ?: [[self historyDateFormatter] stringFromDate:[NSDate date]];
+    metadata[@"status"] = @"complete";
+    NSString *resumeDataPath = [metadata[@"resumeDataPath"] isKindOfClass:NSString.class] ? metadata[@"resumeDataPath"] : @"";
+    [self removeDownloadResumeDataAtPath:resumeDataPath];
+    [metadata removeObjectForKey:@"resumeDataPath"];
+    [metadata removeObjectForKey:@"error"];
+    if (![metadata[@"filename"] isKindOfClass:NSString.class]) metadata[@"filename"] = @"download";
+    [self downloadIDForMetadata:metadata];
+    [self recordDownloadEntry:metadata];
+    [self.downloadMetadata removeObjectForKey:download];
+    [self.activeDownloads removeObject:download];
+    [self setStatusText:self.activeDownloads.count > 0 ? @"Downloading" : @"Download complete"];
+    [self updateDownloadsButton];
+    [self stopDownloadRefreshTimerIfIdle];
+    [self refreshDownloadsPopoverIfOpen];
+    [self reloadSettingsIfVisible];
+}
+
+- (void)download:(WKDownload *)download didFailWithError:(NSError *)error resumeData:(NSData *)resumeData {
+    NSMutableDictionary<NSString *, id> *metadata = [[self.downloadMetadata objectForKey:download] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSString *downloadID = [self downloadIDForMetadata:metadata];
+    metadata[@"timestamp"] = metadata[@"timestamp"] ?: [[self historyDateFormatter] stringFromDate:[NSDate date]];
+    metadata[@"status"] = @"failed";
+    metadata[@"error"] = error.localizedDescription ?: @"Download failed";
+    if (![metadata[@"filename"] isKindOfClass:NSString.class]) metadata[@"filename"] = @"download";
+    [metadata removeObjectForKey:@"resumeDataPath"];
+    NSString *resumePath = [self storeResumeData:resumeData forDownloadID:downloadID];
+    if (resumePath.length > 0) metadata[@"resumeDataPath"] = resumePath;
+    [self recordDownloadEntry:metadata];
+    [self.downloadMetadata removeObjectForKey:download];
+    [self.activeDownloads removeObject:download];
+    [self setStatusText:error.localizedDescription ?: @"Download failed"];
+    [self updateDownloadsButton];
+    [self stopDownloadRefreshTimerIfIdle];
+    [self refreshDownloadsPopoverIfOpen];
+    [self reloadSettingsIfVisible];
 }
 
 @end

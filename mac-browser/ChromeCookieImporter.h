@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ChromeCookieImportResult : NSObject
 @property (nonatomic, assign) NSUInteger imported;
 @property (nonatomic, assign) NSUInteger skipped;
+@property (nonatomic, assign) NSUInteger decryptionFailures;
 @end
 
 @interface ChromeCookieImporter : NSObject

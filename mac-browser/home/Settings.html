@@ -7,69 +7,179 @@
   <link rel="stylesheet" href="Settings.css">
 </head>
 <body>
-  <main class="settings">
-    <header class="settings-head">
-      <h1>Settings</h1>
-      <p>Manage how TrailBrowser behaves on this Mac.</p>
-    </header>
-
-    <section class="card">
-      <div class="card-row">
-        <div class="card-text">
-          <h2>Sync cookies from Chrome</h2>
-          <p>
-            Copy cookies from a local Google Chrome profile so you stay signed in
-            to your sites. This also reduces "unusual traffic" checks from sites
-            like Google that distrust signed-out, cookieless sessions.
-          </p>
-          <p class="hint">macOS may ask permission to read "Chrome Safe Storage" from your Keychain.</p>
-        </div>
-        <button id="sync-cookies" class="primary" type="button">Sync Chrome Cookies</button>
+  <main class="settings-shell">
+    <aside class="settings-nav" aria-label="Settings sections">
+      <div class="settings-brand">
+        <h1>Settings</h1>
+        <p>TrailBrowser</p>
       </div>
-    </section>
+      <button class="settings-nav-item" type="button" data-settings-page="general">General</button>
+      <button class="settings-nav-item" type="button" data-settings-page="ai">AI</button>
+      <button class="settings-nav-item" type="button" data-settings-page="privacy">Privacy</button>
+      <button class="settings-nav-item" type="button" data-settings-page="permissions">Site Permissions</button>
+      <button class="settings-nav-item" type="button" data-settings-page="bookmarks">Bookmarks</button>
+      <button class="settings-nav-item" type="button" data-settings-page="downloads">Downloads</button>
+      <button class="settings-nav-item" type="button" data-settings-page="history">History</button>
+    </aside>
 
-    <section class="card">
-      <div class="card-row">
-        <div class="card-text">
-          <h2>AI engine</h2>
-          <p>Choose which CLI powers Ask, Edit, and AI search — Codex or Claude —
-            its model, and (for Codex) how hard it thinks.</p>
-        </div>
-        <div class="controls">
-          <label>Engine
-            <select id="ai-engine">
-              <option value="codex">Codex</option>
-              <option value="claude">Claude</option>
-            </select>
-          </label>
-          <label>Model
-            <select id="ai-model"></select>
-          </label>
-          <label id="speed-field">Speed
-            <select id="codex-speed">
-              <option value="minimal">Fastest</option>
-              <option value="low">Fast</option>
-              <option value="medium">Balanced</option>
-              <option value="high">Thorough</option>
-            </select>
-          </label>
-        </div>
-      </div>
-    </section>
+    <section class="settings-content">
+      <section class="settings-page" data-page="general">
+        <header class="settings-head">
+          <h2>General</h2>
+        </header>
 
-    <section class="card">
-      <div class="card-row">
-        <div class="card-text">
-          <h2>Start page</h2>
-          <p>Open the TrailBrowser home page with search and quick links.</p>
-        </div>
-        <button id="open-home" class="ghost" type="button">Open Home</button>
-      </div>
-    </section>
+        <section class="card">
+          <div class="card-row">
+            <div class="card-text">
+              <h3>Start page</h3>
+              <p>Search and quick links.</p>
+            </div>
+            <button id="open-home" class="ghost" type="button">Open Home</button>
+          </div>
+        </section>
 
-    <footer class="settings-foot">
-      TrailBrowser · native WebKit browser shell
-    </footer>
+        <section class="card">
+          <div class="card-row">
+            <div class="card-text">
+              <h3>Chrome cookies</h3>
+              <p>Copy cookies from a local Chrome profile.</p>
+              <p class="hint">macOS may ask for Keychain access.</p>
+            </div>
+            <button id="sync-cookies" class="primary" type="button">Sync Cookies</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="settings-page" data-page="ai" hidden>
+        <header class="settings-head">
+          <h2>AI</h2>
+        </header>
+
+        <section class="card">
+          <div class="card-row">
+            <div class="card-text">
+              <h3>Engine</h3>
+              <p>Choose the CLI and model for Ask, Edit, and AI search.</p>
+            </div>
+            <div class="controls">
+              <label>Engine
+                <select id="ai-engine">
+                  <option value="codex">Codex</option>
+                  <option value="claude">Claude</option>
+                </select>
+              </label>
+              <label>Model
+                <select id="ai-model"></select>
+              </label>
+              <label id="speed-field">Speed
+                <select id="codex-speed">
+                  <option value="minimal">Fastest</option>
+                  <option value="low">Fast</option>
+                  <option value="medium">Balanced</option>
+                  <option value="high">Thorough</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="settings-page" data-page="privacy" hidden>
+        <header class="settings-head">
+          <h2>Privacy</h2>
+        </header>
+
+        <section class="card privacy-card">
+          <div class="history-head">
+            <div class="card-text">
+              <h3>Browsing data</h3>
+              <p>Clear local WebKit and TrailBrowser data.</p>
+            </div>
+            <div class="privacy-actions">
+              <button id="clear-site-data" class="ghost danger" type="button">Clear Site Data</button>
+              <button id="clear-all-data" class="ghost danger" type="button">Clear All Data</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="settings-page" data-page="permissions" hidden>
+        <header class="settings-head">
+          <h2>Site Permissions</h2>
+        </header>
+
+        <section class="card library-card">
+          <div class="history-head">
+            <div class="card-text">
+              <h3>Camera and microphone</h3>
+              <p>Saved choices by website origin.</p>
+            </div>
+            <button id="clear-permissions" class="ghost danger" type="button">Clear Permissions</button>
+          </div>
+          <input id="permission-filter" class="history-filter" type="search"
+                 placeholder="Search permissions by site">
+          <div id="permission-list" class="history-list compact-list"></div>
+        </section>
+      </section>
+
+      <section class="settings-page" data-page="bookmarks" hidden>
+        <header class="settings-head">
+          <h2>Bookmarks</h2>
+        </header>
+
+        <section class="card library-card">
+          <div class="history-head">
+            <div class="card-text">
+              <h3>Saved pages</h3>
+            </div>
+            <div class="row-actions">
+              <button id="import-bookmarks" class="ghost" type="button">Import</button>
+              <button id="export-bookmarks" class="ghost" type="button">Export</button>
+            </div>
+          </div>
+          <input id="bookmark-filter" class="history-filter" type="search"
+                 placeholder="Search bookmarks">
+          <div id="bookmark-list" class="history-list"></div>
+        </section>
+      </section>
+
+      <section class="settings-page" data-page="downloads" hidden>
+        <header class="settings-head">
+          <h2>Downloads</h2>
+        </header>
+
+        <section class="card library-card">
+          <div class="history-head">
+            <div class="card-text">
+              <h3>Recent files</h3>
+            </div>
+            <button id="clear-downloads" class="ghost danger" type="button">Clear Downloads</button>
+          </div>
+          <div id="download-list" class="history-list"></div>
+        </section>
+      </section>
+
+      <section class="settings-page" data-page="history" hidden>
+        <header class="settings-head">
+          <h2>History</h2>
+        </header>
+
+        <section class="card history-card">
+          <div class="history-head">
+            <div class="card-text">
+              <h3>AI clusters</h3>
+              <p>Grouped by topic from your local browsing history.</p>
+            </div>
+            <button id="cluster-history" class="ghost" type="button">Refresh AI Clusters</button>
+            <button id="clear-history" class="ghost danger" type="button">Clear History</button>
+          </div>
+          <input id="history-filter" class="history-filter" type="search"
+                 placeholder="Search history">
+          <div id="history-cluster-meta" class="cluster-meta"></div>
+          <div id="history-list" class="history-list"></div>
+        </section>
+      </section>
+    </section>
   </main>
 
   <script src="Settings.js"></script>

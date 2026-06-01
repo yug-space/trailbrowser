@@ -6,7 +6,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface BrowserAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, WKNavigationDelegate, WKUIDelegate, NSTableViewDataSource, NSTableViewDelegate>
+@interface BrowserAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, NSTableViewDataSource, NSTableViewDelegate>
 @property (nonatomic, strong) NSWindow *window;
 @property (nonatomic, strong, nullable) WKWebView *webView;
 @property (nonatomic, strong) NSView *webContainer;
@@ -39,7 +39,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSButton *assistantResultCloseButton;
 @property (nonatomic, strong) NSButton *assistantCollapseButton;
 @property (nonatomic, strong) NSLayoutConstraint *sidebarWidthConstraint;
-@property (nonatomic, copy) NSString *lastRecordedURL;
+@property (nonatomic, copy, nullable) NSString *lastRecordedURL;
 @property (nonatomic, assign) NSInteger activeTabIndex;
 @property (nonatomic, assign) BOOL renderingInternalPage;
 @property (nonatomic, assign) BOOL userEditingAddress;

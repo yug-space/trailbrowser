@@ -30,6 +30,10 @@
   </dict>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSCameraUsageDescription</key>
+  <string>TrailBrowser lets websites use the camera only after you grant permission.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>TrailBrowser lets websites use the microphone only after you grant permission.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>

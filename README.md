@@ -31,10 +31,13 @@ and substantially less once background tabs sleep. Reproduce with
 
 - A flat, near-black UI with a warm-orange accent and smooth control animations
 - A clean one-line top bar: highlighted sidebar toggle, centered address/search
-  pill, reload, **Ask**, and a settings gear
+  pill, reload, downloads/bookmarks controls, **Ask**, and a settings gear
 - A native **home page** with a Google ⇄ AI search toggle and quick links
 - **First-run onboarding** that offers to sync cookies from Chrome
-- A **settings page** (`Cmd+,`) for syncing Chrome cookies and more
+- A **settings page** (`Cmd+,`) for syncing Chrome cookies, privacy controls,
+  site permissions, bookmarks, downloads, history, and AI engine preferences
+- History with automatic topic clusters and optional AI-cluster refresh
+- Bookmarks with toolbar access, Settings management, and HTML import/export
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
   slept), and hover-to-close
 - **Efficient memory & process use:** WebKit shares content processes across
@@ -43,8 +46,8 @@ and substantially less once background tabs sleep. Reproduce with
   memory pressure — far lighter than a Chromium renderer-per-tab
 - A built-in **page assistant** (Ask / Edit) powered by the `codex` or `claude` CLI
 - A 2px accent loading bar and a status dot
-- Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`, `Cmd+B`, `Cmd+,`,
-  `Cmd+[`, `Cmd+]`
+- Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+Shift+N`, `Cmd+W`,
+  `Cmd+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`, `Cmd+[`, `Cmd+]`
 - A read-only **history MCP server** for querying your browsing history
 
 ## Repository layout
@@ -64,7 +67,9 @@ and substantially less once background tabs sleep. Reproduce with
 | `Makefile` | Builds the app and runs the MCP server |
 
 See [AGENTS.md](AGENTS.md) for architecture and conventions, and
-[CONTRIBUTING.md](CONTRIBUTING.md) for how to build and test.
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to build and test. The current
+browser-basics implementation status is tracked in
+[docs/BROWSER_FEATURES.md](docs/BROWSER_FEATURES.md).
 
 ## Build & run
 

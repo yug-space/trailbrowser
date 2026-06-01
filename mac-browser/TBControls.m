@@ -44,9 +44,9 @@
 - (void)refreshBackground {
     NSColor *color = NSColor.clearColor;
     if (self.isEnabled && (self.hovering || self.isHighlighted)) {
-        color = [NSColor colorWithWhite:1.0 alpha:(self.isHighlighted ? 0.16 : 0.08)];
+        color = [NSColor colorWithWhite:1.0 alpha:(self.isHighlighted ? 0.12 : 0.06)];
     } else if (self.active) {
-        color = [NSColor colorWithWhite:1.0 alpha:0.10];
+        color = [NSColor colorWithWhite:1.0 alpha:0.045];
     }
     TBAnimateBackground(self.layer, color, 0.16);
 }
@@ -102,7 +102,7 @@
         fill = self.hovering ? TBAccentHover() : TBAccent();
         self.layer.borderWidth = 0.0;
     } else {
-        fill = self.hovering ? TBElevated() : [NSColor colorWithWhite:1.0 alpha:0.05];
+        fill = self.hovering ? TBElevated() : [NSColor colorWithWhite:1.0 alpha:0.035];
         self.layer.borderWidth = 1.0;
         self.layer.borderColor = TBBorder().CGColor;
     }
@@ -121,7 +121,7 @@
     NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
     paragraph.alignment = NSTextAlignmentCenter;
     NSDictionary<NSAttributedStringKey, id> *attributes = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:NSFontWeightSemibold],
+        NSFontAttributeName: [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium],
         NSForegroundColorAttributeName: textColor,
         NSParagraphStyleAttributeName: paragraph
     };

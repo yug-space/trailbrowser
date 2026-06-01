@@ -163,7 +163,9 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     return [NSData dataWithBytes:derived length:sizeof(derived)];
 }
 
-+ (nullable NSString *)decryptValue:(NSData *)encrypted withKey:(NSData *)key {
++ (nullable NSData *)decryptData:(NSData *)encrypted
+                         withKey:(NSData *)key
+                   schemaVersion:(int)schemaVersion {
     if (encrypted.length <= 3) return nil;
 
     const unsigned char *bytes = encrypted.bytes;
@@ -189,21 +191,108 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     if (status != kCCSuccess) return nil;
     plain.length = decryptedLength;
 
-    NSString *full = [[NSString alloc] initWithData:plain encoding:NSUTF8StringEncoding];
-    if (full) return full;
-
-    if (plain.length > 32) {
-        NSData *stripped = [plain subdataWithRange:NSMakeRange(32, plain.length - 32)];
-        NSString *value = [[NSString alloc] initWithData:stripped encoding:NSUTF8StringEncoding];
-        if (value) return value;
+    if (schemaVersion >= 24 && plain.length > 32) {
+        return [plain subdataWithRange:NSMakeRange(32, plain.length - 32)];
     }
-    return nil;
+
+    return plain;
+}
+
++ (nullable NSString *)decryptValue:(NSData *)encrypted
+                             withKey:(NSData *)key
+                       schemaVersion:(int)schemaVersion {
+    NSData *plain = [self decryptData:encrypted withKey:key schemaVersion:schemaVersion];
+    if (!plain) return nil;
+
+    NSString *value = [[NSString alloc] initWithData:plain encoding:NSUTF8StringEncoding];
+    return value ?: [[NSString alloc] initWithData:plain encoding:NSISOLatin1StringEncoding];
+}
+
++ (nullable NSString *)temporaryCopyOfCookiesDatabase:(NSString *)cookiesPath
+                                            directory:(NSString **)tempDirectory
+                                                error:(NSError **)error {
+    NSString *tempRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                          [NSString stringWithFormat:@"TrailBrowser-Cookies-%@",
+                           [[NSUUID UUID] UUIDString]]];
+    NSError *createError = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:tempRoot
+                                   withIntermediateDirectories:YES
+                                                    attributes:nil
+                                                         error:&createError]) {
+        if (error) {
+            *error = [NSError errorWithDomain:kChromeCookieErrorDomain
+                                         code:2
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    [NSString stringWithFormat:
+                                                     @"Could not create a temporary cookie import directory: %@",
+                                                     createError.localizedDescription ?: @"unknown error"]}];
+        }
+        return nil;
+    }
+
+    NSString *copyPath = [tempRoot stringByAppendingPathComponent:@"Cookies"];
+    NSError *copyError = nil;
+    if (![[NSFileManager defaultManager] copyItemAtPath:cookiesPath toPath:copyPath error:&copyError]) {
+        [[NSFileManager defaultManager] removeItemAtPath:tempRoot error:NULL];
+        if (error) {
+            *error = [NSError errorWithDomain:kChromeCookieErrorDomain
+                                         code:2
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    [NSString stringWithFormat:
+                                                     @"Could not read the Chrome cookies database: %@",
+                                                     copyError.localizedDescription ?: @"unknown error"]}];
+        }
+        return nil;
+    }
+
+    for (NSString *suffix in @[ @"-wal", @"-shm" ]) {
+        NSString *sidecar = [cookiesPath stringByAppendingString:suffix];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:sidecar]) continue;
+        NSString *sidecarCopy = [copyPath stringByAppendingString:suffix];
+        [[NSFileManager defaultManager] copyItemAtPath:sidecar toPath:sidecarCopy error:NULL];
+    }
+
+    if (tempDirectory) *tempDirectory = tempRoot;
+    return copyPath;
+}
+
++ (int)schemaVersionForDatabase:(sqlite3 *)db {
+    sqlite3_stmt *stmt = NULL;
+    int version = 0;
+    if (sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key='version'", -1, &stmt, NULL) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) version = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return version;
+}
+
++ (BOOL)table:(NSString *)table hasColumn:(NSString *)column inDatabase:(sqlite3 *)db {
+    NSString *sql = [NSString stringWithFormat:@"PRAGMA table_info(%@)", table];
+    sqlite3_stmt *stmt = NULL;
+    BOOL found = NO;
+    if (sqlite3_prepare_v2(db, sql.UTF8String, -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            NSString *name = [self stringFromColumn:1 of:stmt];
+            if ([name isEqualToString:column]) {
+                found = YES;
+                break;
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
 }
 
 #pragma mark - Extraction
 
 + (nullable NSArray<NSHTTPCookie *> *)cookiesForProfileDirectory:(NSString *)directory
                                                           error:(NSError **)error {
+    return [self cookiesForProfileDirectory:directory error:error importResult:nil];
+}
+
++ (nullable NSArray<NSHTTPCookie *> *)cookiesForProfileDirectory:(NSString *)directory
+                                                          error:(NSError **)error
+                                                   importResult:(nullable ChromeCookieImportResult *)result {
     NSString *cookiesPath = [self cookiesPathForProfileDirectory:directory];
     if (!cookiesPath) {
         if (error) {
@@ -218,31 +307,20 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     NSData *key = [self decryptionKeyWithError:error];
     if (!key) return nil;
 
-    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                          [NSString stringWithFormat:@"TrailBrowser-Cookies-%@.sqlite",
-                           [[NSUUID UUID] UUIDString]]];
-    NSError *copyError = nil;
-    [[NSFileManager defaultManager] removeItemAtPath:tempPath error:NULL];
-    if (![[NSFileManager defaultManager] copyItemAtPath:cookiesPath toPath:tempPath error:&copyError]) {
-        if (error) {
-            *error = [NSError errorWithDomain:kChromeCookieErrorDomain
-                                         code:2
-                                     userInfo:@{NSLocalizedDescriptionKey:
-                                                    [NSString stringWithFormat:
-                                                     @"Could not read the Chrome cookies database: %@",
-                                                     copyError.localizedDescription ?: @"unknown error"]}];
-        }
-        return nil;
-    }
+    NSString *tempDirectory = nil;
+    NSString *tempPath = [self temporaryCopyOfCookiesDatabase:cookiesPath
+                                                    directory:&tempDirectory
+                                                        error:error];
+    if (!tempPath) return nil;
 
     sqlite3 *db = NULL;
     NSMutableArray<NSHTTPCookie *> *cookies = [NSMutableArray array];
 
     int rc = sqlite3_open_v2(tempPath.fileSystemRepresentation, &db,
-                             SQLITE_OPEN_READONLY, NULL);
+                             SQLITE_OPEN_READWRITE, NULL);
     if (rc != SQLITE_OK) {
         if (db) sqlite3_close(db);
-        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:NULL];
+        [[NSFileManager defaultManager] removeItemAtPath:tempDirectory error:NULL];
         if (error) {
             *error = [NSError errorWithDomain:kChromeCookieErrorDomain
                                          code:rc
@@ -252,13 +330,16 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
         return nil;
     }
 
-    const char *sql =
-        "SELECT host_key, name, value, encrypted_value, path, "
-        "expires_utc, is_secure, is_httponly, samesite FROM cookies";
+    int schemaVersion = [self schemaVersionForDatabase:db];
+    BOOL hasExpiresColumn = [self table:@"cookies" hasColumn:@"has_expires" inDatabase:db];
+    BOOL hasPersistentColumn = [self table:@"cookies" hasColumn:@"is_persistent" inDatabase:db];
+    NSString *sqlString = (hasExpiresColumn && hasPersistentColumn)
+        ? @"SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite, has_expires, is_persistent FROM cookies"
+        : @"SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite FROM cookies";
     sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, sqlString.UTF8String, -1, &stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
-        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:NULL];
+        [[NSFileManager defaultManager] removeItemAtPath:tempDirectory error:NULL];
         if (error) {
             *error = [NSError errorWithDomain:kChromeCookieErrorDomain
                                          code:3
@@ -277,33 +358,50 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
         BOOL isSecure = sqlite3_column_int(stmt, 6) != 0;
         BOOL isHTTPOnly = sqlite3_column_int(stmt, 7) != 0;
         int sameSite = sqlite3_column_int(stmt, 8);
+        BOOL hasExpires = hasExpiresColumn ? (sqlite3_column_int(stmt, 9) != 0) : (expiresUtc > 0);
+        BOOL isPersistent = hasPersistentColumn ? (sqlite3_column_int(stmt, 10) != 0) : hasExpires;
 
-        if (host.length == 0 || name.length == 0) continue;
+        if (host.length == 0 || name.length == 0) {
+            result.skipped += 1;
+            continue;
+        }
 
         NSString *value = nil;
+        BOOL encryptedValueFailed = NO;
         const void *blob = sqlite3_column_blob(stmt, 3);
         int blobLength = sqlite3_column_bytes(stmt, 3);
         if (blob && blobLength > 0) {
             NSData *encrypted = [NSData dataWithBytes:blob length:blobLength];
-            value = [self decryptValue:encrypted withKey:key];
+            value = [self decryptValue:encrypted withKey:key schemaVersion:schemaVersion];
+            encryptedValueFailed = (value == nil);
         }
         if (value == nil) value = plainValue;
-        if (value == nil) continue;
+        if (value == nil || (encryptedValueFailed && plainValue.length == 0)) {
+            result.skipped += 1;
+            if (encryptedValueFailed) result.decryptionFailures += 1;
+            continue;
+        }
 
         NSHTTPCookie *cookie = [self cookieWithHost:host
                                                name:name
                                               value:value
                                                path:path
                                          expiresUtc:expiresUtc
+                                         hasExpires:hasExpires
+                                         persistent:isPersistent
                                              secure:isSecure
                                            httpOnly:isHTTPOnly
                                            sameSite:sameSite];
-        if (cookie) [cookies addObject:cookie];
+        if (cookie) {
+            [cookies addObject:cookie];
+        } else {
+            result.skipped += 1;
+        }
     }
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
-    [[NSFileManager defaultManager] removeItemAtPath:tempPath error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:tempDirectory error:NULL];
 
     return cookies;
 }
@@ -324,6 +422,8 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
                                     value:(NSString *)value
                                      path:(nullable NSString *)path
                                expiresUtc:(long long)expiresUtc
+                               hasExpires:(BOOL)hasExpires
+                                persistent:(BOOL)persistent
                                    secure:(BOOL)secure
                                  httpOnly:(BOOL)httpOnly
                                  sameSite:(int)sameSite {
@@ -332,19 +432,21 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     properties[NSHTTPCookieValue] = value;
     properties[NSHTTPCookieDomain] = host;
     properties[NSHTTPCookiePath] = path.length ? path : @"/";
+    properties[NSHTTPCookieVersion] = @"0";
+    properties[NSHTTPCookieDiscard] = persistent ? @"FALSE" : @"TRUE";
     if (secure) properties[NSHTTPCookieSecure] = @"TRUE";
     if (httpOnly) properties[@"HttpOnly"] = @YES;
 
-    if (expiresUtc > 0) {
+    if (hasExpires && persistent && expiresUtc > 0) {
         double unixSeconds = (double)expiresUtc / 1000000.0 - kWindowsEpochToUnixSeconds;
-        if (unixSeconds > 0) {
-            properties[NSHTTPCookieExpires] = [NSDate dateWithTimeIntervalSince1970:unixSeconds];
-        }
+        if (unixSeconds <= [[NSDate date] timeIntervalSince1970]) return nil;
+        properties[NSHTTPCookieExpires] = [NSDate dateWithTimeIntervalSince1970:unixSeconds];
     }
 
     if (@available(macOS 10.15, *)) {
-
-        if (sameSite == 1) {
+        if (sameSite == 0) {
+            properties[NSHTTPCookieSameSitePolicy] = @"none";
+        } else if (sameSite == 1) {
             properties[NSHTTPCookieSameSitePolicy] = NSHTTPCookieSameSiteLax;
         } else if (sameSite == 2) {
             properties[NSHTTPCookieSameSitePolicy] = NSHTTPCookieSameSiteStrict;
@@ -362,7 +464,10 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
                                          NSError *_Nullable))completion {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
-        NSArray<NSHTTPCookie *> *cookies = [self cookiesForProfileDirectory:directory error:&error];
+        ChromeCookieImportResult *result = [[ChromeCookieImportResult alloc] init];
+        NSArray<NSHTTPCookie *> *cookies = [self cookiesForProfileDirectory:directory
+                                                                       error:&error
+                                                                importResult:result];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (cookies == nil) {
@@ -370,7 +475,6 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
                 return;
             }
 
-            ChromeCookieImportResult *result = [[ChromeCookieImportResult alloc] init];
             if (cookies.count == 0) {
                 completion(result, nil);
                 return;
