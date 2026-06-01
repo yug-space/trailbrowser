@@ -205,6 +205,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                   key:@"\t"
             modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)
                  menu:navMenu];
+    [self addMenuItem:@"Next Tab"
+               action:@selector(selectNextTab:)
+                  key:@"\t"
+            modifiers:NSEventModifierFlagControl
+                 menu:navMenu];
+    [self addMenuItem:@"Previous Tab"
+               action:@selector(selectPreviousTab:)
+                  key:@"\t"
+            modifiers:(NSEventModifierFlagControl | NSEventModifierFlagShift)
+                 menu:navMenu];
     [navMenu addItem:[NSMenuItem separatorItem]];
     [self addMenuItem:@"Home" action:@selector(goHome:) key:@"" menu:navMenu];
     [self addMenuItem:@"Reload" action:@selector(reloadPage:) key:@"r" menu:navMenu];
@@ -1811,6 +1821,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             return nil;
         }
 
+        if ([self isControlTabEvent:event]) {
+            BOOL backward = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+            [self cycleActiveTabBy:backward ? -1 : 1];
+            return nil;
+        }
+
         if (self.tabSwitcherVisible) {
             if (event.keyCode == kEscapeKeyCode) {
                 [self cancelTabSwitcher];
@@ -1848,10 +1864,38 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
            (flags & NSEventModifierFlagOption);
 }
 
+- (BOOL)isControlTabEvent:(NSEvent *)event {
+    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    return event.keyCode == kTabKeyCode &&
+           (flags & NSEventModifierFlagControl) &&
+           !(flags & NSEventModifierFlagCommand) &&
+           !(flags & NSEventModifierFlagOption);
+}
+
 - (void)showTabSwitcherFromMenu:(id)sender {
     (void)sender;
     [self beginOrAdvanceTabSwitcherBackward:NO];
     [self commitTabSwitcher];
+}
+
+- (void)selectNextTab:(id)sender {
+    (void)sender;
+    [self cycleActiveTabBy:1];
+}
+
+- (void)selectPreviousTab:(id)sender {
+    (void)sender;
+    [self cycleActiveTabBy:-1];
+}
+
+- (void)cycleActiveTabBy:(NSInteger)delta {
+    if (self.tabs.count <= 1) return;
+    if (self.tabSwitcherVisible) [self cancelTabSwitcher];
+
+    NSInteger count = (NSInteger)self.tabs.count;
+    NSInteger current = self.activeTabIndex >= 0 ? self.activeTabIndex : 0;
+    NSInteger next = (current + delta + count) % count;
+    [self selectTabAtIndex:next];
 }
 
 - (void)beginOrAdvanceTabSwitcherBackward:(BOOL)backward {
