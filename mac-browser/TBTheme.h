@@ -3,6 +3,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef NS_ENUM(NSInteger, TBThemeMode) {
+    TBThemeModeLight,
+    TBThemeModeDark
+};
+
+void TBThemeSetMode(TBThemeMode mode);
+TBThemeMode TBThemeCurrentMode(void);
+TBThemeMode TBThemeModeFromString(NSString *name);
+NSString *TBThemeModeName(TBThemeMode mode);
+BOOL TBThemeIsDark(void);
+
 NSColor *TBBg(void);
 NSColor *TBSurface(void);
 NSColor *TBElevated(void);

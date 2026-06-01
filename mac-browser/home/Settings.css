@@ -1,4 +1,25 @@
 :root {
+  color-scheme: light;
+  --bg: #f7eef4;
+  --surface: rgba(255, 255, 255, 0.88);
+  --surface-hover: rgba(23, 20, 26, 0.055);
+  --text: #17141a;
+  --muted: #625d6a;
+  --faint: #a9a2ae;
+  --line: rgba(30, 24, 38, 0.1);
+  --accent: #ec6b5b;
+  --accent-hover: #de5a4b;
+  --danger: #c63e4f;
+  --page-bg: linear-gradient(135deg, #f6d9e6 0%, #fbf7fb 48%, #edf0ff 100%);
+  --nav-fill: rgba(255, 255, 255, 0.62);
+  --active-fill: rgba(255, 255, 255, 0.78);
+  --control-fill: rgba(255, 255, 255, 0.72);
+  --switch-fill: rgba(255, 255, 255, 0.52);
+  --card-shadow: 0 18px 48px rgba(55, 45, 65, 0.07);
+  --active-shadow: 0 8px 24px rgba(55, 45, 65, 0.06);
+}
+
+:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0a0a0b;
   --surface: #161618;
@@ -7,8 +28,14 @@
   --muted: #8a8a90;
   --faint: #56565c;
   --line: rgba(255, 255, 255, 0.09);
-  --accent: #f76b1c;
-  --accent-hover: #ff8330;
+  --danger: #ff9a8a;
+  --page-bg: #0a0a0b;
+  --nav-fill: #101012;
+  --active-fill: #1f1f23;
+  --control-fill: #1f1f23;
+  --switch-fill: transparent;
+  --card-shadow: none;
+  --active-shadow: none;
 }
 
 * {
@@ -24,7 +51,7 @@ body {
 body {
   min-height: 100vh;
   color: var(--text);
-  background: var(--bg);
+  background: var(--page-bg);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
 }
 
@@ -55,6 +82,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--nav-fill);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(24px);
 }
 
 .settings-brand {
@@ -65,7 +98,7 @@ body {
 .settings-brand h1 {
   margin: 0;
   font-size: 20px;
-  font-weight: 300;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
@@ -97,7 +130,8 @@ body {
 .settings-nav-item.active {
   border-color: var(--line);
   color: var(--text);
-  background: var(--surface);
+  background: var(--active-fill);
+  box-shadow: var(--active-shadow);
 }
 
 .settings-content {
@@ -121,7 +155,7 @@ body {
 .settings-head h2 {
   margin: 0;
   font-size: 24px;
-  font-weight: 300;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
@@ -129,6 +163,8 @@ body {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(24px);
   padding: 18px;
 }
 
@@ -146,7 +182,7 @@ body {
 .card-text h3 {
   margin: 0 0 6px;
   font-size: 15px;
-  font-weight: 300;
+  font-weight: 400;
 }
 
 .card-text p {
@@ -176,7 +212,7 @@ button {
 
 button.primary {
   border: 0;
-  color: #1a0d04;
+  color: #ffffff;
   background: var(--accent);
 }
 
@@ -192,7 +228,7 @@ button.primary:disabled {
 button.ghost {
   border: 1px solid var(--line);
   color: var(--text);
-  background: transparent;
+  background: var(--switch-fill);
 }
 
 button.ghost:hover {
@@ -200,12 +236,12 @@ button.ghost:hover {
 }
 
 button.danger {
-  color: #ff9a8a;
+  color: var(--danger);
 }
 
 button.danger:hover {
-  border-color: rgba(255, 77, 77, 0.36);
-  background: rgba(255, 77, 77, 0.1);
+  border-color: rgba(198, 62, 79, 0.28);
+  background: rgba(198, 62, 79, 0.08);
 }
 
 .controls {
@@ -230,7 +266,7 @@ button.danger:hover {
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--surface-hover);
+  background: var(--control-fill);
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -254,7 +290,7 @@ button.danger:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--text);
-  background: transparent;
+  background: var(--switch-fill);
   font-size: 13px;
   font-weight: 400;
 }
@@ -282,7 +318,7 @@ button.danger:hover {
 }
 
 .privacy-card {
-  border-color: rgba(255, 77, 77, 0.18);
+  border-color: rgba(198, 62, 79, 0.2);
 }
 
 .privacy-actions {
@@ -302,7 +338,7 @@ button.danger:hover {
   height: 38px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--surface-hover);
+  background: var(--control-fill);
   color: var(--text);
   padding: 0 12px;
   font: inherit;
@@ -342,7 +378,7 @@ button.danger:hover {
 .history-cluster {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--switch-fill);
   padding: 12px;
 }
 
@@ -366,7 +402,7 @@ button.danger:hover {
 .history-cluster-count {
   min-width: 26px;
   height: 22px;
-  border: 1px solid rgba(247, 107, 28, 0.28);
+  border: 1px solid rgba(236, 107, 91, 0.32);
   border-radius: 999px;
   color: var(--accent);
   display: grid;
@@ -454,13 +490,13 @@ button.danger:hover {
 }
 
 .bookmark-draggable.drop-target {
-  border-color: rgba(247, 107, 28, 0.36);
-  background: rgba(247, 107, 28, 0.06);
+  border-color: rgba(236, 107, 91, 0.36);
+  background: rgba(236, 107, 91, 0.08);
 }
 
 .download-active {
-  border-color: rgba(247, 107, 28, 0.22);
-  background: rgba(247, 107, 28, 0.045);
+  border-color: rgba(236, 107, 91, 0.24);
+  background: rgba(236, 107, 91, 0.07);
 }
 
 .download-progress {
@@ -508,7 +544,7 @@ button.danger:hover {
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--surface-hover);
+  background: var(--control-fill);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -537,15 +573,15 @@ button.danger:hover {
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  color: #ff9a8a;
+  color: var(--danger);
   background: transparent;
   font-size: 12px;
   font-weight: 400;
 }
 
 .bookmark-remove:hover {
-  border-color: rgba(255, 77, 77, 0.36);
-  background: rgba(255, 77, 77, 0.1);
+  border-color: rgba(198, 62, 79, 0.28);
+  background: rgba(198, 62, 79, 0.08);
 }
 
 .bookmark-remove.neutral {

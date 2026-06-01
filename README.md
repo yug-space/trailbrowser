@@ -29,7 +29,8 @@ and substantially less once background tabs sleep. Reproduce with
 
 ## Features
 
-- A flat, near-black UI with a warm-orange accent and smooth control animations
+- Sleek light and dark UI themes with pale surfaces, deep dark surfaces,
+  a coral accent, and smooth control animations
 - A clean one-line top bar: highlighted sidebar toggle, centered address/search
   pill, reload, downloads/bookmarks controls, **Ask AI**, and a settings gear
 - A native **home page** with a Google ⇄ AI search toggle and quick links
@@ -151,7 +152,7 @@ URLs are redacted for sensitive query keys before being written to history.
 the delegate builds the menu and window, then opens the onboarding page on first
 run or the home page afterwards.
 
-The UI is native AppKit, themed near-black with a warm-orange accent
+The UI is native AppKit, themed with light/dark surfaces and a coral accent
 (`TBTheme`):
 
 - `NSWindow` is the main app window; the toolbar and sidebar are flat

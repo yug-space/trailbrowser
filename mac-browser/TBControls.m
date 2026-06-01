@@ -44,11 +44,17 @@
 - (void)refreshBackground {
     NSColor *color = NSColor.clearColor;
     if (self.isEnabled && (self.hovering || self.isHighlighted)) {
-        color = [NSColor colorWithWhite:1.0 alpha:(self.isHighlighted ? 0.12 : 0.06)];
+        color = [NSColor colorWithWhite:TBThemeIsDark() ? 1.0 : 0.0
+                                  alpha:(self.isHighlighted ? 0.10 : 0.055)];
     } else if (self.active) {
-        color = [NSColor colorWithWhite:1.0 alpha:0.045];
+        color = [TBAccent() colorWithAlphaComponent:0.14];
     }
     TBAnimateBackground(self.layer, color, 0.16);
+}
+
+- (void)refreshTheme {
+    [self refreshBackground];
+    [self setNeedsDisplay:YES];
 }
 
 @end
@@ -102,7 +108,9 @@
         fill = self.hovering ? TBAccentHover() : TBAccent();
         self.layer.borderWidth = 0.0;
     } else {
-        fill = self.hovering ? TBElevated() : [NSColor colorWithWhite:1.0 alpha:0.035];
+        fill = self.hovering
+            ? TBElevated()
+            : [NSColor colorWithWhite:1.0 alpha:(TBThemeIsDark() ? 0.035 : 0.70)];
         self.layer.borderWidth = 1.0;
         self.layer.borderColor = TBBorder().CGColor;
     }
@@ -134,6 +142,11 @@
     [title drawInRect:rect];
 }
 
+- (void)refreshTheme {
+    [self refreshBackground];
+    [self setNeedsDisplay:YES];
+}
+
 @end
 
 #pragma mark - Thin progress bar
@@ -150,6 +163,10 @@
         [self.layer addSublayer:self.fillLayer];
     }
     return self;
+}
+
+- (void)refreshTheme {
+    self.fillLayer.backgroundColor = TBAccent().CGColor;
 }
 
 - (void)setProgress:(double)progress {
@@ -187,6 +204,11 @@
     return self;
 }
 
+- (void)refreshTheme {
+    self.layer.backgroundColor = TBElevated().CGColor;
+    self.layer.borderColor = (self.focused ? [TBAccent() colorWithAlphaComponent:0.9] : TBBorder()).CGColor;
+}
+
 - (void)setFocused:(BOOL)focused {
     if (_focused == focused) return;
     _focused = focused;
@@ -217,12 +239,20 @@
     if (self) {
         self.wantsLayer = YES;
         self.layer.cornerRadius = 8.0;
-        self.layer.backgroundColor = [NSColor colorWithWhite:1.0 alpha:0.05].CGColor;
+        self.layer.backgroundColor = TBSurface().CGColor;
+        self.layer.borderWidth = 1.0;
+        self.layer.borderColor = TBBorder().CGColor;
         self.focusRingType = NSFocusRingTypeNone;
         _titles = @[];
         _selectedIndex = 0;
     }
     return self;
+}
+
+- (void)refreshTheme {
+    self.layer.backgroundColor = TBSurface().CGColor;
+    self.layer.borderColor = TBBorder().CGColor;
+    [self setNeedsDisplay:YES];
 }
 
 - (void)setTitles:(NSArray<NSString *> *)titles {

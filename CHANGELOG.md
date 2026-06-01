@@ -16,6 +16,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Bookmarks bar now appears automatically when saved bookmarks exist until the
   user explicitly chooses a visibility preference.
 
+### Changed
+- Refreshed the native chrome and bundled pages with sleek light and dark
+  themes, pale/deep surfaces, softer shadows, and a coral accent.
+
 ## [1.0.0] - 2026-05-31
 
 First public release.

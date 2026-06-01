@@ -43,7 +43,7 @@
         [TBAccent() setFill];
         [accentPath fill];
     } else if (self.hovering) {
-        [[NSColor colorWithWhite:1.0 alpha:0.05] setFill];
+        [[NSColor colorWithWhite:TBThemeIsDark() ? 1.0 : 0.0 alpha:0.05] setFill];
         [fillPath fill];
     }
 }

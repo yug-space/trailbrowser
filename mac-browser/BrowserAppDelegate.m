@@ -48,6 +48,8 @@
 @property (nonatomic, assign) NSInteger tabSwitcherIndex;
 @property (nonatomic, assign) BOOL restoringSession;
 @property (nonatomic, assign) BOOL suppressTabSelectionChange;
+@property (nonatomic, strong) NSView *rootView;
+@property (nonatomic, strong) NSMutableArray<NSView *> *themeHairlines;
 - (NSString *)sitePermissionSummaryForURL:(NSURL *)url;
 @end
 
@@ -70,6 +72,7 @@ static NSString * const TBSitePermissionDeny = @"deny";
 static NSString * const TBTabDragPasteboardType = @"com.trailbrowser.tab-row";
 static NSString * const TBBookmarkBarVisibleKey = @"TBBookmarkBarVisible";
 static NSString * const TBBookmarkBarUserConfiguredKey = @"TBBookmarkBarUserConfigured";
+static NSString * const TBThemeModeDefaultsKey = @"TBThemeMode";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -79,6 +82,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     (void)notification;
 
+    [self loadSavedThemeMode];
     [self buildMenu];
     [self buildWindow];
     [self startMemoryPressureMonitor];
@@ -213,6 +217,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagOption)
                  menu:viewMenu];
     [viewMenu addItem:[NSMenuItem separatorItem]];
+    [self addMenuItem:@"Use Dark Mode" action:@selector(toggleDarkMode:) key:@"" menu:viewMenu];
+    [viewMenu addItem:[NSMenuItem separatorItem]];
     [self addMenuItem:@"Show Bookmarks Bar"
                action:@selector(toggleBookmarkBar:)
                   key:@"b"
@@ -275,6 +281,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         menuItem.state = self.bookmarkBarVisible ? NSControlStateValueOn : NSControlStateValueOff;
         menuItem.title = self.bookmarkBarVisible ? @"Hide Bookmarks Bar" : @"Show Bookmarks Bar";
     }
+    if (menuItem.action == @selector(toggleDarkMode:)) {
+        menuItem.state = TBThemeIsDark() ? NSControlStateValueOn : NSControlStateValueOff;
+        menuItem.title = TBThemeIsDark() ? @"Use Light Mode" : @"Use Dark Mode";
+    }
     if (menuItem.action == @selector(reopenClosedTab:)) {
         return self.recentlyClosedTabs.count > 0;
     }
@@ -333,6 +343,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.activeTabIndex = -1;
     self.sidebarVisible = YES;
     self.bookmarkBarVisible = [self initialBookmarkBarVisible];
+    self.themeHairlines = [NSMutableArray array];
 
     NSRect frame = NSMakeRect(0, 0, 1200, 760);
     NSWindowStyleMask style = NSWindowStyleMaskTitled |
@@ -356,13 +367,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self.window center];
 
     self.window.backgroundColor = TBBg();
-    self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    self.window.appearance = [self themeWindowAppearance];
 
     NSView *root = [[NSView alloc] initWithFrame:NSZeroRect];
     root.translatesAutoresizingMaskIntoConstraints = NO;
     root.wantsLayer = YES;
     root.layer.backgroundColor = TBBg().CGColor;
     self.window.contentView = root;
+    self.rootView = root;
 
     NSView *toolbar = [[NSView alloc] initWithFrame:NSZeroRect];
     toolbar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -764,11 +776,157 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (!self.restoringSession) [self writeBrowserStateRunning:YES];
 }
 
+- (NSAppearance *)themeWindowAppearance {
+    return [NSAppearance appearanceNamed:TBThemeIsDark() ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+}
+
+- (NSAppearance *)themeVibrantAppearance {
+    return [NSAppearance appearanceNamed:TBThemeIsDark() ? NSAppearanceNameVibrantDark : NSAppearanceNameVibrantLight];
+}
+
+- (void)loadSavedThemeMode {
+    NSString *name = [[NSUserDefaults standardUserDefaults] stringForKey:TBThemeModeDefaultsKey] ?: @"light";
+    TBThemeSetMode(TBThemeModeFromString(name));
+}
+
+- (NSAttributedString *)placeholderWithString:(NSString *)string size:(CGFloat)size {
+    return [[NSAttributedString alloc] initWithString:string attributes:@{
+        NSForegroundColorAttributeName: TBFaint(),
+        NSFontAttributeName: [NSFont systemFontOfSize:size weight:NSFontWeightRegular]
+    }];
+}
+
+- (void)refreshButtonTitleColor:(NSButton *)button {
+    if (button.imagePosition == NSImageOnly) return;
+    NSAttributedString *title = button.attributedTitle;
+    if (title.length == 0) return;
+    NSString *plainTitle = title.string ?: @"";
+    if (plainTitle.length == 0 || [plainTitle isEqualToString:@"Button"]) return;
+    NSMutableAttributedString *updated = [title mutableCopy];
+    [updated addAttribute:NSForegroundColorAttributeName
+                    value:TBText()
+                    range:NSMakeRange(0, updated.length)];
+    button.attributedTitle = updated;
+}
+
+- (void)refreshThemeForViewTree:(NSView *)view {
+    if ([view isKindOfClass:TBFlatButton.class]) {
+        [(TBFlatButton *)view refreshTheme];
+        [self refreshButtonTitleColor:(NSButton *)view];
+    } else if ([view isKindOfClass:TBPillButton.class]) {
+        [(TBPillButton *)view refreshTheme];
+    } else if ([view isKindOfClass:TBProgressBar.class]) {
+        [(TBProgressBar *)view refreshTheme];
+    } else if ([view isKindOfClass:TBFieldContainer.class]) {
+        [(TBFieldContainer *)view refreshTheme];
+    } else if ([view isKindOfClass:TBSegmentedControl.class]) {
+        [(TBSegmentedControl *)view refreshTheme];
+    } else if ([view isKindOfClass:NSButton.class]) {
+        [self refreshButtonTitleColor:(NSButton *)view];
+    }
+
+    if (@available(macOS 10.14, *)) {
+        if ([view isKindOfClass:NSButton.class]) {
+            NSButton *button = (NSButton *)view;
+            if (button.image && button.contentTintColor) button.contentTintColor = TBMuted();
+        }
+    }
+
+    for (NSView *subview in view.subviews) {
+        [self refreshThemeForViewTree:subview];
+    }
+}
+
+- (void)applyTheme {
+    self.window.backgroundColor = TBBg();
+    self.window.appearance = [self themeWindowAppearance];
+    self.rootView.layer.backgroundColor = TBBg().CGColor;
+    self.toolbar.layer.backgroundColor = TBSurface().CGColor;
+    self.bookmarkBar.layer.backgroundColor = TBSurface().CGColor;
+    self.sidebar.layer.backgroundColor = TBSurface().CGColor;
+    self.webContainer.layer.backgroundColor = TBBg().CGColor;
+
+    for (NSView *line in self.themeHairlines) {
+        line.layer.backgroundColor = TBBorder().CGColor;
+    }
+
+    self.assistantBar.appearance = [self themeVibrantAppearance];
+    self.assistantBar.layer.borderColor = TBBorder().CGColor;
+    self.assistantBar.layer.backgroundColor = TBSurface().CGColor;
+    self.assistantResultPanel.appearance = [self themeVibrantAppearance];
+    self.assistantResultPanel.layer.borderColor = TBBorder().CGColor;
+    self.assistantResultPanel.layer.backgroundColor = TBSurface().CGColor;
+    self.findBar.appearance = [self themeVibrantAppearance];
+    self.findBar.layer.borderColor = TBBorder().CGColor;
+    self.findBar.layer.backgroundColor = TBSurface().CGColor;
+    self.addressSuggestionsPanel.appearance = [self themeVibrantAppearance];
+    self.addressSuggestionsPanel.layer.borderColor = TBBorder().CGColor;
+    self.addressSuggestionsPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.96].CGColor;
+    self.tabSwitcherPanel.appearance = [self themeVibrantAppearance];
+    self.tabSwitcherPanel.layer.borderColor = TBBorder().CGColor;
+    self.tabSwitcherPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.72].CGColor;
+
+    self.addressField.textColor = TBText();
+    self.addressField.placeholderAttributedString = [self placeholderWithString:@"Search or enter website name" size:13.5];
+    self.assistantPromptField.textColor = TBText();
+    self.assistantPromptField.placeholderAttributedString = [self placeholderWithString:@"Ask about this page" size:13.0];
+    self.findField.textColor = TBText();
+    self.findField.placeholderAttributedString = [self placeholderWithString:@"Find in page" size:13.0];
+    self.findStatusLabel.textColor = TBFaint();
+    self.assistantResultTextView.textColor = TBText();
+    self.tabCountLabel.textColor = TBFaint();
+
+    [self refreshThemeForViewTree:self.rootView];
+    if (@available(macOS 10.14, *)) self.assistantRunButton.contentTintColor = TBAccent();
+    [self reloadBookmarkBarItems];
+    [self.tabTable reloadData];
+    [self renderAddressSuggestions];
+    if (self.tabSwitcherVisible) [self refreshTabSwitcher];
+    [self updateControls];
+}
+
+- (void)reloadCurrentInternalPageForTheme {
+    BrowserTab *tab = [self activeTab];
+    if (!self.webView || !tab) return;
+    NSString *tabURL = tab.urlString ?: @"";
+    NSString *webURL = self.webView.URL.absoluteString ?: @"";
+    if ([self isSettingsURLString:tabURL] ||
+        [self isSettingsURLString:webURL] ||
+        [tab.title hasPrefix:@"Settings"]) {
+        [self loadNativeSettingsPageInWebView:self.webView];
+    } else if ([self isHomeURLString:tabURL] ||
+               [self isHomeURLString:webURL] ||
+               [tab.title hasPrefix:@"TrailBrowser Home"]) {
+        [self loadNativeHomePageInWebView:self.webView];
+    } else if ([self isOnboardingURLString:tabURL] ||
+               [self isOnboardingURLString:webURL] ||
+               [tab.title hasPrefix:@"Welcome"]) {
+        [self loadNativeOnboardingPageInWebView:self.webView];
+    }
+}
+
+- (void)setThemeModeName:(NSString *)name persist:(BOOL)persist {
+    TBThemeMode mode = TBThemeModeFromString(name);
+    if (persist) {
+        [[NSUserDefaults standardUserDefaults] setObject:TBThemeModeName(mode) forKey:TBThemeModeDefaultsKey];
+    }
+    if (mode == TBThemeCurrentMode()) return;
+    TBThemeSetMode(mode);
+    [self applyTheme];
+    [self reloadCurrentInternalPageForTheme];
+}
+
+- (void)toggleDarkMode:(id)sender {
+    (void)sender;
+    [self setThemeModeName:(TBThemeIsDark() ? @"light" : @"dark") persist:YES];
+}
+
 - (NSView *)hairlineView {
     NSView *line = [[NSView alloc] initWithFrame:NSZeroRect];
     line.translatesAutoresizingMaskIntoConstraints = NO;
     line.wantsLayer = YES;
     line.layer.backgroundColor = TBBorder().CGColor;
+    [self.themeHairlines addObject:line];
     return line;
 }
 
@@ -907,7 +1065,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantBar.material = NSVisualEffectMaterialHUDWindow;
     self.assistantBar.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     self.assistantBar.state = NSVisualEffectStateActive;
-    self.assistantBar.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.assistantBar.appearance = [self themeVibrantAppearance];
     self.assistantBar.wantsLayer = YES;
     self.assistantBar.layer.cornerRadius = 14.0;
     self.assistantBar.layer.masksToBounds = YES;
@@ -973,7 +1131,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.assistantResultPanel.material = NSVisualEffectMaterialHUDWindow;
     self.assistantResultPanel.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     self.assistantResultPanel.state = NSVisualEffectStateActive;
-    self.assistantResultPanel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.assistantResultPanel.appearance = [self themeVibrantAppearance];
     self.assistantResultPanel.hidden = YES;
     self.assistantResultPanel.wantsLayer = YES;
     self.assistantResultPanel.layer.cornerRadius = 14.0;
@@ -1059,7 +1217,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.findBar.material = NSVisualEffectMaterialHUDWindow;
     self.findBar.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     self.findBar.state = NSVisualEffectStateActive;
-    self.findBar.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.findBar.appearance = [self themeVibrantAppearance];
     self.findBar.hidden = YES;
     self.findBar.wantsLayer = YES;
     self.findBar.layer.cornerRadius = 12.0;
@@ -1322,7 +1480,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressSuggestionsPanel.material = NSVisualEffectMaterialHUDWindow;
     self.addressSuggestionsPanel.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     self.addressSuggestionsPanel.state = NSVisualEffectStateActive;
-    self.addressSuggestionsPanel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.addressSuggestionsPanel.appearance = [self themeVibrantAppearance];
     self.addressSuggestionsPanel.hidden = YES;
     self.addressSuggestionsPanel.alphaValue = 0.0;
     self.addressSuggestionsPanel.wantsLayer = YES;
@@ -1461,6 +1619,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                              suggestion:self.addressSuggestions[i]
                                                selected:((NSInteger)i == self.addressSuggestionIndex)];
         [self.addressSuggestionsStack addArrangedSubview:row];
+        [row.widthAnchor constraintEqualToAnchor:self.addressSuggestionsStack.widthAnchor].active = YES;
     }
 }
 
@@ -1509,7 +1668,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [row addSubview:subtitle];
 
     [NSLayoutConstraint activateConstraints:@[
-        [row.widthAnchor constraintEqualToAnchor:self.addressSuggestionsStack.widthAnchor],
         [row.heightAnchor constraintEqualToConstant:42.0],
 
         [icon.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:10.0],
@@ -1560,7 +1718,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabSwitcherPanel.material = NSVisualEffectMaterialHUDWindow;
     self.tabSwitcherPanel.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     self.tabSwitcherPanel.state = NSVisualEffectStateActive;
-    self.tabSwitcherPanel.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+    self.tabSwitcherPanel.appearance = [self themeVibrantAppearance];
     self.tabSwitcherPanel.hidden = YES;
     self.tabSwitcherPanel.alphaValue = 0.0;
     self.tabSwitcherPanel.wantsLayer = YES;
@@ -2571,7 +2729,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (NSString *)nativeResourceHTMLNamed:(NSString *)name {
     NSString *html = [self resourceStringNamed:name extension:@"html"];
     if (html.length == 0) {
-        return @"<!doctype html><title>TrailBrowser</title><body style='background:#0a0a0b'></body>";
+        NSString *background = TBThemeIsDark() ? @"#0a0a0b" : @"#f7eef4";
+        return [NSString stringWithFormat:@"<!doctype html><title>TrailBrowser</title><body style='background:%@'></body>", background];
     }
 
     NSString *css = [self resourceStringNamed:name extension:@"css"];
@@ -2738,6 +2897,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             [self setBookmarkBarVisible:visible persist:YES];
             return YES;
         }
+        if ([key isEqualToString:@"themeMode"]) {
+            [self setThemeModeName:value persist:YES];
+            return YES;
+        }
         NSDictionary<NSString *, NSString *> *allowed = @{ @"aiEngine": @"TBAIEngine",
                                                            @"codexModel": @"TBCodexModel",
                                                            @"claudeModel": @"TBClaudeModel",
@@ -2781,11 +2944,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
     NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
     NSString *bookmarkBar = self.bookmarkBarVisible ? @"true" : @"false";
+    NSString *themeMode = TBThemeModeName(TBThemeCurrentMode());
     return [NSString stringWithFormat:
-        @"<script>window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
+        @"<script>document.documentElement.dataset.theme=\"%@\";"
+         "window.__tbThemeMode=\"%@\";window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
          "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";"
          "window.__tbBookmarkBarVisible=%@;</script></head>",
-        engine, codexModel, claudeModel, effort, bookmarkBar];
+        themeMode, themeMode, engine, codexModel, claudeModel, effort, bookmarkBar];
 }
 
 - (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
@@ -2822,7 +2987,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.stringValue = [self onboardingURLString];
     self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
-    [webView loadHTMLString:[self nativeResourceHTMLNamed:@"Onboarding"]
+    NSString *html = [[self nativeResourceHTMLNamed:@"Onboarding"]
+                      stringByReplacingOccurrencesOfString:@"</head>"
+                                                withString:[self aiPrefsScript]];
+    [webView loadHTMLString:html
                     baseURL:[NSURL URLWithString:[self onboardingURLString]]];
 }
 
@@ -5180,18 +5348,24 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (NSString *)sourceViewerHTMLForURLString:(NSString *)urlString source:(NSString *)source {
     NSString *escapedURL = [self htmlEscaped:urlString ?: @""];
     NSString *escapedSource = [self htmlEscaped:source ?: @""];
+    NSString *scheme = TBThemeIsDark() ? @"dark" : @"light";
+    NSString *background = TBThemeIsDark() ? @"#0a0a0b" : @"#f7eef4";
+    NSString *surface = TBThemeIsDark() ? @"#161618" : @"#fffafd";
+    NSString *text = TBThemeIsDark() ? @"#f3f3f4" : @"#17141a";
+    NSString *muted = TBThemeIsDark() ? @"#8a8a90" : @"#625d6a";
+    NSString *border = TBThemeIsDark() ? @"rgba(255,255,255,.09)" : @"rgba(30,24,38,.1)";
     return [NSString stringWithFormat:
         @"<!doctype html><html><head><meta charset='utf-8'>"
          "<title>View Source</title><style>"
-         ":root{color-scheme:dark}*{box-sizing:border-box}"
-         "body{margin:0;background:#0a0a0b;color:#f3f3f4;"
+         ":root{color-scheme:%@}*{box-sizing:border-box}"
+         "body{margin:0;background:%@;color:%@;"
          "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55}"
-         "header{position:sticky;top:0;padding:12px 18px;background:#161618;border-bottom:1px solid rgba(255,255,255,.09)}"
+         "header{position:sticky;top:0;padding:12px 18px;background:%@;border-bottom:1px solid %@}"
          "h1{margin:0 0 3px;font:600 13px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif}"
-         "p{margin:0;color:#8a8a90;font:12px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+         "p{margin:0;color:%@;font:12px -apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
          "pre{margin:0;padding:18px;white-space:pre-wrap;word-break:break-word}"
          "</style></head><body><header><h1>View Source</h1><p>%@</p></header><pre>%@</pre></body></html>",
-        escapedURL, escapedSource];
+        scheme, background, text, surface, border, muted, escapedURL, escapedSource];
 }
 
 - (void)viewSource:(id)sender {
@@ -5431,22 +5605,26 @@ doCommandBySelector:(SEL)commandSelector {
     NSString *spinner = spinning
         ? @"<div class='spin'></div>"
         : @"<div class='dot'></div>";
+    NSString *background = TBThemeIsDark() ? @"#0a0a0b" : @"linear-gradient(135deg,#f6d9e6 0%,#fbf7fb 48%,#edf0ff 100%)";
+    NSString *text = TBThemeIsDark() ? @"#f3f3f4" : @"#17141a";
+    NSString *muted = TBThemeIsDark() ? @"#8a8a90" : @"#625d6a";
+    NSString *spinnerBorder = TBThemeIsDark() ? @"rgba(255,255,255,0.12)" : @"rgba(23,20,26,0.12)";
     return [NSString stringWithFormat:
         @"<!doctype html><html><head><meta charset='utf-8'><style>"
          "html,body{height:100%%;margin:0}"
-         "body{display:grid;place-items:center;background:#0a0a0b;color:#f3f3f4;"
+         "body{display:grid;place-items:center;background:%@;color:%@;"
          "font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',sans-serif}"
          ".box{text-align:center;max-width:520px;padding:0 24px}"
          ".spin{width:34px;height:34px;margin:0 auto 22px;border-radius:50%%;"
-         "border:3px solid rgba(255,255,255,0.12);border-top-color:#f76b1c;animation:s 0.8s linear infinite}"
-         ".dot{width:14px;height:14px;margin:0 auto 22px;border-radius:50%%;background:#ff4d4d}"
+         "border:3px solid %@;border-top-color:#ec6b5b;animation:s 0.8s linear infinite}"
+         ".dot{width:14px;height:14px;margin:0 auto 22px;border-radius:50%%;background:#d94a5c}"
          "@keyframes s{to{transform:rotate(360deg)}}"
-         "h1{font-size:20px;font-weight:600;margin:0 0 8px}"
-         "p{color:#8a8a90;font-size:14px;line-height:1.5;margin:0}"
-         ".q{color:#f76b1c}"
+         "h1{font-size:20px;font-weight:500;margin:0 0 8px}"
+         "p{color:%@;font-size:14px;line-height:1.5;margin:0}"
+         ".q{color:#ec6b5b}"
          "</style></head><body><div class='box'>%@"
          "<h1>%@</h1><p class='q'>%@</p><p>%@</p></div></body></html>",
-        spinner, [self htmlEscaped:heading], q, [self htmlEscaped:note]];
+        background, text, spinnerBorder, muted, spinner, [self htmlEscaped:heading], q, [self htmlEscaped:note]];
 }
 
 - (NSString *)contentFragmentFromCodexOutput:(NSString *)output {
@@ -5486,47 +5664,50 @@ doCommandBySelector:(SEL)commandSelector {
 }
 
 - (NSString *)articlePageHTMLWithQuery:(NSString *)query contentHTML:(NSString *)contentHTML {
+    NSString *themeCSS = TBThemeIsDark()
+        ? @":root{color-scheme:dark;--bg:#0a0a0b;--page-bg:#0a0a0b;--text:#f3f3f4;--body:#e7e7ea;--muted:#8a8a90;--line:rgba(255,255,255,0.09);--code-bg:#111113;--code-line:rgba(255,255,255,0.09);--strong:#fff}"
+        : @":root{color-scheme:light;--bg:#f7eef4;--page-bg:linear-gradient(135deg,#f6d9e6 0%,#fbf7fb 48%,#edf0ff 100%);--text:#17141a;--body:#332d39;--muted:#625d6a;--line:rgba(30,24,38,0.1);--code-bg:rgba(255,255,255,0.84);--code-line:rgba(30,24,38,0.1);--strong:#17141a}";
     return [NSString stringWithFormat:
         @"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
          "<meta name='viewport' content='width=device-width, initial-scale=1'>"
          "<title>%@</title><style>"
-         ":root{color-scheme:dark}"
+         "%@"
          "*{box-sizing:border-box}"
          "html,body{margin:0}"
-         "body{background:#0a0a0b;color:#f3f3f4;"
+         "body{background:var(--bg);color:var(--text);"
          "font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',sans-serif;"
          "line-height:1.7;font-size:16px;"
-         "background-image:radial-gradient(900px 500px at 50%% -8%%,rgba(247,107,28,0.10),transparent 70%%)}"
+         "background-image:var(--page-bg)}"
          ".wrap{max-width:760px;margin:0 auto;padding:64px 28px 96px}"
-         "header.page{border-bottom:1px solid rgba(255,255,255,0.09);padding-bottom:22px;margin-bottom:34px}"
-         ".eyebrow{display:inline-flex;align-items:center;gap:7px;color:#f76b1c;font-size:12px;"
-         "font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin:0 0 12px}"
-         ".eyebrow::before{content:'';width:7px;height:7px;border-radius:50%%;background:#f76b1c}"
-         "h1{font-size:30px;line-height:1.2;font-weight:700;letter-spacing:-0.5px;margin:0}"
+         "header.page{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:34px}"
+         ".eyebrow{display:inline-flex;align-items:center;gap:7px;color:#ec6b5b;font-size:12px;"
+         "font-weight:600;letter-spacing:0;text-transform:uppercase;margin:0 0 12px}"
+         ".eyebrow::before{content:'';width:7px;height:7px;border-radius:50%%;background:#ec6b5b}"
+         "h1{font-size:30px;line-height:1.2;font-weight:500;letter-spacing:0;margin:0}"
          "article{animation:rise .4s cubic-bezier(.22,.61,.36,1) both}"
          "@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}"
-         "h2{font-size:21px;font-weight:650;letter-spacing:-0.3px;margin:38px 0 12px}"
-         "h3{font-size:17px;font-weight:650;margin:26px 0 8px}"
-         "p{margin:0 0 16px;color:#e7e7ea}"
-         "a{color:#ff8330;text-decoration:none;border-bottom:1px solid rgba(255,131,48,0.35)}"
-         "a:hover{border-bottom-color:#ff8330}"
-         "ul,ol{margin:0 0 18px;padding-left:22px}li{margin:6px 0;color:#e7e7ea}"
-         "strong{color:#fff}"
-         "blockquote{margin:20px 0;padding:4px 18px;border-left:3px solid #f76b1c;color:#c9c9cf}"
-         "code{background:#1b1b1f;padding:2px 6px;border-radius:5px;font-size:0.92em}"
-         "pre{background:#111113;border:1px solid rgba(255,255,255,0.09);border-radius:10px;"
+         "h2{font-size:21px;font-weight:500;letter-spacing:0;margin:38px 0 12px}"
+         "h3{font-size:17px;font-weight:500;margin:26px 0 8px}"
+         "p{margin:0 0 16px;color:var(--body)}"
+         "a{color:#de5a4b;text-decoration:none;border-bottom:1px solid rgba(222,90,75,0.35)}"
+         "a:hover{border-bottom-color:#de5a4b}"
+         "ul,ol{margin:0 0 18px;padding-left:22px}li{margin:6px 0;color:var(--body)}"
+         "strong{color:var(--strong)}"
+         "blockquote{margin:20px 0;padding:4px 18px;border-left:3px solid #ec6b5b;color:var(--muted)}"
+         "code{background:var(--code-bg);border:1px solid var(--code-line);padding:2px 6px;border-radius:5px;font-size:0.92em}"
+         "pre{background:var(--code-bg);border:1px solid var(--code-line);border-radius:10px;"
          "padding:16px;overflow:auto}pre code{background:none;padding:0}"
          "table{width:100%%;border-collapse:collapse;margin:18px 0;font-size:14.5px}"
-         "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.09)}"
-         "th{color:#8a8a90;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;font-size:12px}"
-         "hr{border:0;border-top:1px solid rgba(255,255,255,0.09);margin:34px 0}"
+         "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}"
+         "th{color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0;font-size:12px}"
+         "hr{border:0;border-top:1px solid var(--line);margin:34px 0}"
          "img{max-width:100%%;border-radius:10px}"
          "svg{display:block;max-width:100%%;height:auto;margin:8px auto 4px}"
          "@media(prefers-reduced-motion:reduce){article{animation:none}}"
          "</style></head><body><div class='wrap'>"
          "<header class='page'><p class='eyebrow'>TrailBrowser AI</p><h1>%@</h1></header>"
          "<article>%@</article></div></body></html>",
-        [self htmlEscaped:query], [self htmlEscaped:query], contentHTML];
+        [self htmlEscaped:query], themeCSS, [self htmlEscaped:query], contentHTML];
 }
 
 - (void)runWebpageSearchForQuery:(NSString *)query {

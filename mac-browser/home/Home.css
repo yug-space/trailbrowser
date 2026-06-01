@@ -1,4 +1,22 @@
 :root {
+  color-scheme: light;
+  --bg: #f7eef4;
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-hover: rgba(23, 20, 26, 0.055);
+  --text: #17141a;
+  --muted: #625d6a;
+  --faint: #a9a2ae;
+  --line: rgba(30, 24, 38, 0.1);
+  --accent: #ec6b5b;
+  --accent-hover: #de5a4b;
+  --page-bg: linear-gradient(135deg, #f6d9e6 0%, #fbf7fb 46%, #edf0ff 100%);
+  --card-shadow: 0 24px 80px rgba(70, 55, 80, 0.1);
+  --focus-shadow: 0 22px 74px rgba(70, 55, 80, 0.12), 0 0 0 3px rgba(236, 107, 91, 0.14);
+  --control-fill: rgba(23, 20, 26, 0.035);
+  --chip-fill: rgba(255, 255, 255, 0.62);
+}
+
+:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0a0a0b;
   --surface: #161618;
@@ -7,8 +25,11 @@
   --muted: #8a8a90;
   --faint: #56565c;
   --line: rgba(255, 255, 255, 0.09);
-  --accent: #f76b1c;
-  --accent-hover: #ff8330;
+  --page-bg: #0a0a0b;
+  --card-shadow: none;
+  --focus-shadow: 0 0 0 3px rgba(236, 107, 91, 0.18);
+  --control-fill: rgba(255, 255, 255, 0.04);
+  --chip-fill: transparent;
 }
 
 * {
@@ -27,7 +48,7 @@ body {
   place-items: center;
   overflow: hidden;
   color: var(--text);
-  background: var(--bg);
+  background: var(--page-bg);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
 }
 
@@ -67,7 +88,7 @@ body {
   gap: 14px;
   font-size: 64px;
   font-weight: 300;
-  letter-spacing: -2px;
+  letter-spacing: 0;
   color: var(--text);
 }
 
@@ -83,14 +104,16 @@ body {
   gap: 14px;
   padding: 18px 18px 14px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 8px;
   background: var(--surface);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(24px);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .search-card:focus-within {
-  border-color: rgba(247, 107, 28, 0.7);
-  box-shadow: 0 0 0 3px rgba(247, 107, 28, 0.14);
+  border-color: rgba(236, 107, 91, 0.68);
+  box-shadow: var(--focus-shadow);
 }
 
 #query {
@@ -129,7 +152,7 @@ body {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--control-fill);
 }
 
 .seg-btn {
@@ -141,7 +164,7 @@ body {
   color: var(--muted);
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.14s ease, color 0.14s ease;
 }
@@ -152,7 +175,7 @@ body {
 
 .seg-btn.is-active {
   background: var(--accent);
-  color: #1a0d04;
+  color: #ffffff;
 }
 
 .submit {
@@ -164,7 +187,7 @@ body {
   border: 0;
   border-radius: 50%;
   background: var(--accent);
-  color: #1a0d04;
+  color: #ffffff;
   cursor: pointer;
   transition: background 0.12s ease, opacity 0.12s ease;
 }
@@ -195,7 +218,7 @@ body {
   padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: transparent;
+  background: var(--chip-fill);
   color: var(--muted);
   font: inherit;
   font-size: 13px;

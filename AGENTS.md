@@ -54,7 +54,7 @@ the changed flow (navigation, tabs, assistant, settings, cookie import).
 ## Conventions
 
 - **Theme:** never hard-code colors in controls/views. Use the `TB*()` helpers
-  in `TBTheme.h` (near-black surfaces, warm orange `TBAccent()`). Section
+  in `TBTheme.h` (light/dark surfaces, coral `TBAccent()`). Section
   headers are uppercase + tracked + `TBMuted()`.
 - **New reusable control?** Put it in `TBControls.{h,m}`. Hover/press/focus
   states animate via `TBAnimateBackground(...)` or `CABasicAnimation` — keep
