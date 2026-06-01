@@ -177,6 +177,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                  menu:navMenu];
     [self addMenuItem:@"Close Tab" action:@selector(closeCurrentTab:) key:@"w" menu:navMenu];
     [self addMenuItem:@"Duplicate Tab" action:@selector(duplicateCurrentTab:) key:@"" menu:navMenu];
+    [self addMenuItem:@"Pin Tab" action:@selector(toggleCurrentTabPinned:) key:@"" menu:navMenu];
     [self addMenuItem:@"Move Tab Up" action:@selector(moveCurrentTabUp:) key:@"" menu:navMenu];
     [self addMenuItem:@"Move Tab Down" action:@selector(moveCurrentTabDown:) key:@"" menu:navMenu];
     [self addMenuItem:@"Close Other Tabs" action:@selector(closeOtherTabsForCurrentTab:) key:@"" menu:navMenu];
@@ -278,6 +279,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (menuItem.action == @selector(duplicateCurrentTab:)) {
         return self.activeTabIndex >= 0 && self.activeTabIndex < (NSInteger)self.tabs.count;
     }
+    if (menuItem.action == @selector(toggleCurrentTabPinned:)) {
+        BrowserTab *tab = [self activeTab];
+        menuItem.title = tab.pinned ? @"Unpin Tab" : @"Pin Tab";
+        return tab != nil;
+    }
     if (menuItem.action == @selector(closeOtherTabsForCurrentTab:)) {
         return self.tabs.count > 1 && self.activeTabIndex >= 0;
     }
@@ -293,6 +299,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (menuItem.action == @selector(reloadTabFromMenu:) ||
         menuItem.action == @selector(duplicateTabFromMenu:) ||
         menuItem.action == @selector(closeTabFromMenu:)) {
+        NSInteger row = menuItem.tag;
+        return row >= 0 && row < (NSInteger)self.tabs.count;
+    }
+    if (menuItem.action == @selector(toggleTabPinnedFromMenu:)) {
         NSInteger row = menuItem.tag;
         return row >= 0 && row < (NSInteger)self.tabs.count;
     }
@@ -2219,6 +2229,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     duplicate.title = source.title.length ? source.title : @"New Tab";
     duplicate.favicon = source.favicon;
     duplicate.faviconURLString = source.faviconURLString;
+    duplicate.pinned = source.pinned;
     [self reloadSidebarRowForTab:duplicate];
     [self setStatusText:@"Duplicated tab"];
     return duplicate;
@@ -2227,6 +2238,65 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)duplicateCurrentTab:(id)sender {
     (void)sender;
     [self duplicateTabAtIndex:self.activeTabIndex select:YES];
+}
+
+- (NSInteger)pinnedTabCountExcludingIndex:(NSInteger)excludedIndex {
+    NSInteger count = 0;
+    for (NSInteger i = 0; i < (NSInteger)self.tabs.count; i++) {
+        if (i == excludedIndex) continue;
+        if (self.tabs[(NSUInteger)i].pinned) count += 1;
+    }
+    return count;
+}
+
+- (void)refreshTabTableAfterMetadataChangeWithStatus:(NSString *)status {
+    self.suppressTabSelectionChange = YES;
+    [self.tabTable reloadData];
+    if (self.activeTabIndex >= 0 && self.activeTabIndex < (NSInteger)self.tabs.count) {
+        [self.tabTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)self.activeTabIndex]
+                   byExtendingSelection:NO];
+    }
+    self.suppressTabSelectionChange = NO;
+    [self refreshActiveRowHighlight];
+    if (self.tabSwitcherVisible) [self refreshTabSwitcher];
+    if (status.length > 0) [self setStatusText:status];
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
+}
+
+- (void)setPinned:(BOOL)pinned forTabAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.tabs.count) {
+        NSBeep();
+        return;
+    }
+
+    BrowserTab *tab = self.tabs[(NSUInteger)index];
+    if (tab.pinned == pinned) return;
+
+    NSInteger pinnedCount = [self pinnedTabCountExcludingIndex:index];
+    NSInteger dropIndex = pinned ? pinnedCount : pinnedCount + 1;
+    tab.pinned = pinned;
+
+    BOOL moved = [self moveTabFromIndex:index toDropIndex:dropIndex];
+    NSString *status = pinned ? @"Pinned tab" : @"Unpinned tab";
+    if (moved) {
+        [self setStatusText:status];
+    } else {
+        [self refreshTabTableAfterMetadataChangeWithStatus:status];
+    }
+}
+
+- (void)togglePinnedForTabAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.tabs.count) {
+        NSBeep();
+        return;
+    }
+    BrowserTab *tab = self.tabs[(NSUInteger)index];
+    [self setPinned:!tab.pinned forTabAtIndex:index];
+}
+
+- (void)toggleCurrentTabPinned:(id)sender {
+    (void)sender;
+    [self togglePinnedForTabAtIndex:self.activeTabIndex];
 }
 
 - (BOOL)moveTabFromIndex:(NSInteger)sourceIndex toDropIndex:(NSInteger)dropIndex {
@@ -2320,7 +2390,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     return @{
         @"url": urlString,
         @"title": title ?: @"",
-        @"closedAt": [[self historyDateFormatter] stringFromDate:[NSDate date]]
+        @"closedAt": [[self historyDateFormatter] stringFromDate:[NSDate date]],
+        @"pinned": @(tab.pinned)
     };
 }
 
@@ -2356,6 +2427,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (title.length > 0) {
         tab.title = title;
         [self reloadSidebarRowForTab:tab];
+    }
+    if ([entry[@"pinned"] isKindOfClass:NSNumber.class]) {
+        [self setPinned:[entry[@"pinned"] boolValue] forTabAtIndex:self.activeTabIndex];
     }
     [self setStatusText:@"Reopened closed tab"];
     if (!self.restoringSession) [self writeBrowserStateRunning:YES];
@@ -3032,7 +3106,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [entries addObject:@{
             @"url": urlString,
             @"title": title ?: @"",
-            @"lastActiveSeq": @(tab.lastActiveSeq)
+            @"lastActiveSeq": @(tab.lastActiveSeq),
+            @"pinned": @(tab.pinned)
         }];
     }
     return entries;
@@ -3049,10 +3124,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         if (urlString.length == 0 || [urlString hasPrefix:@"view-source:"]) continue;
         NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
         NSString *closedAt = [entry[@"closedAt"] isKindOfClass:NSString.class] ? entry[@"closedAt"] : @"";
+        BOOL pinned = [entry[@"pinned"] isKindOfClass:NSNumber.class] ? [entry[@"pinned"] boolValue] : NO;
         [entries addObject:@{
             @"url": urlString,
             @"title": title ?: @"",
-            @"closedAt": closedAt ?: @""
+            @"closedAt": closedAt ?: @"",
+            @"pinned": @(pinned)
         }];
     }
 
@@ -3150,6 +3227,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         BrowserTab *tab = [self newTabWithURLString:urlString select:((NSInteger)i == activeIndex)];
         NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
         if (title.length > 0) tab.title = title;
+        if ([entry[@"pinned"] isKindOfClass:NSNumber.class]) tab.pinned = [entry[@"pinned"] boolValue];
     }
     self.restoringSession = NO;
 
@@ -5880,12 +5958,17 @@ doCommandBySelector:(SEL)commandSelector {
     NSInteger row = self.tabTable.clickedRow;
     BOOL hasTab = row >= 0 && row < (NSInteger)self.tabs.count;
     if (hasTab) {
+        BrowserTab *tab = self.tabs[(NSUInteger)row];
         [menu addItem:[self tabContextMenuItemWithTitle:@"Reload Tab"
                                                  action:@selector(reloadTabFromMenu:)
                                                     row:row
                                                 enabled:YES]];
         [menu addItem:[self tabContextMenuItemWithTitle:@"Duplicate Tab"
                                                  action:@selector(duplicateTabFromMenu:)
+                                                    row:row
+                                                enabled:YES]];
+        [menu addItem:[self tabContextMenuItemWithTitle:(tab.pinned ? @"Unpin Tab" : @"Pin Tab")
+                                                 action:@selector(toggleTabPinnedFromMenu:)
                                                     row:row
                                                 enabled:YES]];
         [menu addItem:[NSMenuItem separatorItem]];
@@ -5929,6 +6012,10 @@ doCommandBySelector:(SEL)commandSelector {
 
 - (void)duplicateTabFromMenu:(id)sender {
     [self duplicateTabAtIndex:[sender tag] select:YES];
+}
+
+- (void)toggleTabPinnedFromMenu:(id)sender {
+    [self togglePinnedForTabAtIndex:[sender tag]];
 }
 
 - (void)moveTabUpFromMenu:(id)sender {
@@ -6025,7 +6112,11 @@ doCommandBySelector:(SEL)commandSelector {
     } else {
         subtitle = @"New tab";
     }
-    return tab.privateBrowsing ? [@"Private - " stringByAppendingString:subtitle] : subtitle;
+    NSMutableArray<NSString *> *prefixes = [NSMutableArray array];
+    if (tab.privateBrowsing) [prefixes addObject:@"Private"];
+    if (tab.pinned) [prefixes addObject:@"Pinned"];
+    if (prefixes.count == 0) return subtitle;
+    return [NSString stringWithFormat:@"%@ - %@", [prefixes componentsJoinedByString:@" / "], subtitle];
 }
 
 - (void)reloadSidebarRowForTab:(BrowserTab *)tab {
@@ -6232,7 +6323,7 @@ doCommandBySelector:(SEL)commandSelector {
             cell.tabIconView.image = image;
         }
         if (@available(macOS 10.14, *)) {
-            cell.tabIconView.contentTintColor = (selected || tab.privateBrowsing) ? TBAccent() : TBFaint();
+            cell.tabIconView.contentTintColor = (selected || tab.privateBrowsing || tab.pinned) ? TBAccent() : TBFaint();
         }
     }
     return cell;

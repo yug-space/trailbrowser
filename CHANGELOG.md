@@ -12,6 +12,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Sidebar tab context menu and Navigate menu actions for reload, duplicate,
   close other tabs, and close tabs to the right.
 - Sidebar tab drag reordering plus move up/down menu actions.
+- Pinned tabs with session restore and reopen-closed-tab preservation.
 
 ## [1.0.0] - 2026-05-31
 

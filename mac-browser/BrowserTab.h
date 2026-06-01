@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *pendingFaviconURLString;
 @property (nonatomic, assign) NSInteger lastActiveSeq;
 @property (nonatomic, assign) BOOL privateBrowsing;
+@property (nonatomic, assign) BOOL pinned;
 @end
 
 NS_ASSUME_NONNULL_END
