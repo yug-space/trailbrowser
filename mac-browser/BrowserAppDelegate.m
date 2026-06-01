@@ -57,7 +57,7 @@
 
 static const NSInteger kMemorySaverMaxLiveTabs = 6;
 static const NSInteger kMaxConcurrentPreloads = 2;
-static const NSInteger kMaxVisibleSwitcherTabs = 10;
+static const NSInteger kMaxVisibleSwitcherTabs = 9;
 static const NSInteger kMaxRecentlyClosedTabs = 20;
 static const unsigned short kTabKeyCode = 48;
 static const unsigned short kEscapeKeyCode = 53;
@@ -1716,18 +1716,18 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)buildTabSwitcherOverlay {
     self.tabSwitcherPanel = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
     self.tabSwitcherPanel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tabSwitcherPanel.material = NSVisualEffectMaterialHUDWindow;
+    self.tabSwitcherPanel.material = NSVisualEffectMaterialPopover;
     self.tabSwitcherPanel.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     self.tabSwitcherPanel.state = NSVisualEffectStateActive;
     self.tabSwitcherPanel.appearance = [self themeVibrantAppearance];
     self.tabSwitcherPanel.hidden = YES;
     self.tabSwitcherPanel.alphaValue = 0.0;
     self.tabSwitcherPanel.wantsLayer = YES;
-    self.tabSwitcherPanel.layer.cornerRadius = 18.0;
+    self.tabSwitcherPanel.layer.cornerRadius = 22.0;
     self.tabSwitcherPanel.layer.masksToBounds = YES;
     self.tabSwitcherPanel.layer.borderWidth = 1.0;
     self.tabSwitcherPanel.layer.borderColor = TBBorder().CGColor;
-    self.tabSwitcherPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.72].CGColor;
+    self.tabSwitcherPanel.layer.backgroundColor = [TBSurface() colorWithAlphaComponent:0.92].CGColor;
     self.tabSwitcherPanel.layer.zPosition = 200.0;
     [self.webContainer addSubview:self.tabSwitcherPanel];
 
@@ -1736,20 +1736,20 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabSwitcherStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     self.tabSwitcherStack.alignment = NSLayoutAttributeCenterY;
     self.tabSwitcherStack.distribution = NSStackViewDistributionGravityAreas;
-    self.tabSwitcherStack.spacing = 6.0;
+    self.tabSwitcherStack.spacing = 8.0;
     [self.tabSwitcherPanel addSubview:self.tabSwitcherStack];
 
-    self.tabSwitcherWidthConstraint = [self.tabSwitcherPanel.widthAnchor constraintEqualToConstant:220.0];
+    self.tabSwitcherWidthConstraint = [self.tabSwitcherPanel.widthAnchor constraintEqualToConstant:320.0];
     [NSLayoutConstraint activateConstraints:@[
         [self.tabSwitcherPanel.centerXAnchor constraintEqualToAnchor:self.webContainer.centerXAnchor],
         [self.tabSwitcherPanel.centerYAnchor constraintEqualToAnchor:self.webContainer.centerYAnchor constant:-24.0],
         self.tabSwitcherWidthConstraint,
-        [self.tabSwitcherPanel.heightAnchor constraintEqualToConstant:92.0],
+        [self.tabSwitcherPanel.heightAnchor constraintEqualToConstant:116.0],
 
-        [self.tabSwitcherStack.leadingAnchor constraintEqualToAnchor:self.tabSwitcherPanel.leadingAnchor constant:16.0],
-        [self.tabSwitcherStack.trailingAnchor constraintEqualToAnchor:self.tabSwitcherPanel.trailingAnchor constant:-16.0],
-        [self.tabSwitcherStack.topAnchor constraintEqualToAnchor:self.tabSwitcherPanel.topAnchor constant:10.0],
-        [self.tabSwitcherStack.bottomAnchor constraintEqualToAnchor:self.tabSwitcherPanel.bottomAnchor constant:-8.0]
+        [self.tabSwitcherStack.leadingAnchor constraintEqualToAnchor:self.tabSwitcherPanel.leadingAnchor constant:18.0],
+        [self.tabSwitcherStack.trailingAnchor constraintEqualToAnchor:self.tabSwitcherPanel.trailingAnchor constant:-18.0],
+        [self.tabSwitcherStack.topAnchor constraintEqualToAnchor:self.tabSwitcherPanel.topAnchor constant:14.0],
+        [self.tabSwitcherStack.bottomAnchor constraintEqualToAnchor:self.tabSwitcherPanel.bottomAnchor constant:-12.0]
     ]];
 }
 
@@ -1900,8 +1900,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (start < 0) start = 0;
     if (start + visibleCount > count) start = count - visibleCount;
 
-    CGFloat width = 32.0 + visibleCount * 62.0 + MAX(0, visibleCount - 1) * self.tabSwitcherStack.spacing;
-    CGFloat maxWidth = MAX(240.0, NSWidth(self.webContainer.bounds) - 72.0);
+    CGFloat itemWidth = 86.0;
+    CGFloat horizontalPadding = 36.0;
+    CGFloat maxWidth = MAX(260.0, NSWidth(self.webContainer.bounds) - 72.0);
+    NSInteger fittingCount = (NSInteger)floor((maxWidth - horizontalPadding + self.tabSwitcherStack.spacing) /
+                                              (itemWidth + self.tabSwitcherStack.spacing));
+    visibleCount = MAX(1, MIN(visibleCount, fittingCount));
+    if (start + visibleCount > count) start = count - visibleCount;
+
+    CGFloat width = horizontalPadding + visibleCount * itemWidth +
+                    MAX(0, visibleCount - 1) * self.tabSwitcherStack.spacing;
     self.tabSwitcherWidthConstraint.constant = MIN(width, maxWidth);
 
     for (NSInteger i = 0; i < visibleCount; i++) {
@@ -1923,21 +1931,21 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     item.action = @selector(chooseTabFromSwitcherItem:);
     item.tag = index;
     item.wantsLayer = YES;
-    item.layer.cornerRadius = 8.0;
+    item.layer.cornerRadius = 12.0;
     item.layer.masksToBounds = YES;
-    item.layer.backgroundColor = selected ? [TBElevated() colorWithAlphaComponent:0.96].CGColor
-                                          : NSColor.clearColor.CGColor;
-    item.layer.borderWidth = selected ? 1.0 : 0.0;
+    item.layer.backgroundColor = selected ? [TBAccent() colorWithAlphaComponent:0.13].CGColor
+                                          : [TBElevated() colorWithAlphaComponent:0.42].CGColor;
+    item.layer.borderWidth = 1.0;
     item.layer.borderColor = selected ? [TBAccent() colorWithAlphaComponent:0.55].CGColor
-                                      : NSColor.clearColor.CGColor;
+                                      : [TBBorder() colorWithAlphaComponent:0.35].CGColor;
 
     NSView *iconWell = [[NSView alloc] initWithFrame:NSZeroRect];
     iconWell.translatesAutoresizingMaskIntoConstraints = NO;
     iconWell.wantsLayer = YES;
-    iconWell.layer.cornerRadius = 8.0;
+    iconWell.layer.cornerRadius = 12.0;
     iconWell.layer.masksToBounds = YES;
-    iconWell.layer.backgroundColor = selected ? [TBAccent() colorWithAlphaComponent:0.16].CGColor
-                                              : [TBElevated() colorWithAlphaComponent:0.66].CGColor;
+    iconWell.layer.backgroundColor = selected ? [TBElevated() colorWithAlphaComponent:0.86].CGColor
+                                              : [TBSurface() colorWithAlphaComponent:0.72].CGColor;
     [item addSubview:iconWell];
 
     NSImageView *icon = [[NSImageView alloc] initWithFrame:NSZeroRect];
@@ -1952,33 +1960,33 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
     [iconWell addSubview:icon];
 
-    NSTextField *label = [NSTextField labelWithString:selected ? [self switcherTitleForTab:tab] : @" "];
+    NSTextField *label = [NSTextField labelWithString:[self switcherTitleForTab:tab]];
     label.translatesAutoresizingMaskIntoConstraints = NO;
-    label.font = [NSFont systemFontOfSize:10.5 weight:NSFontWeightSemibold];
-    label.textColor = selected ? TBText() : NSColor.clearColor;
+    label.font = [NSFont systemFontOfSize:10.5 weight:NSFontWeightRegular];
+    label.textColor = selected ? TBText() : TBMuted();
     label.alignment = NSTextAlignmentCenter;
     label.lineBreakMode = NSLineBreakByTruncatingTail;
-    label.maximumNumberOfLines = 1;
+    label.maximumNumberOfLines = 2;
     [item addSubview:label];
 
     [NSLayoutConstraint activateConstraints:@[
-        [item.widthAnchor constraintEqualToConstant:62.0],
-        [item.heightAnchor constraintEqualToConstant:72.0],
+        [item.widthAnchor constraintEqualToConstant:86.0],
+        [item.heightAnchor constraintEqualToConstant:88.0],
 
-        [iconWell.topAnchor constraintEqualToAnchor:item.topAnchor constant:5.0],
+        [iconWell.topAnchor constraintEqualToAnchor:item.topAnchor constant:8.0],
         [iconWell.centerXAnchor constraintEqualToAnchor:item.centerXAnchor],
-        [iconWell.widthAnchor constraintEqualToConstant:48.0],
-        [iconWell.heightAnchor constraintEqualToConstant:48.0],
+        [iconWell.widthAnchor constraintEqualToConstant:52.0],
+        [iconWell.heightAnchor constraintEqualToConstant:52.0],
 
         [icon.centerXAnchor constraintEqualToAnchor:iconWell.centerXAnchor],
         [icon.centerYAnchor constraintEqualToAnchor:iconWell.centerYAnchor],
-        [icon.widthAnchor constraintEqualToConstant:34.0],
-        [icon.heightAnchor constraintEqualToConstant:34.0],
+        [icon.widthAnchor constraintEqualToConstant:32.0],
+        [icon.heightAnchor constraintEqualToConstant:32.0],
 
-        [label.leadingAnchor constraintEqualToAnchor:item.leadingAnchor constant:3.0],
-        [label.trailingAnchor constraintEqualToAnchor:item.trailingAnchor constant:-3.0],
-        [label.topAnchor constraintEqualToAnchor:iconWell.bottomAnchor constant:3.0],
-        [label.bottomAnchor constraintLessThanOrEqualToAnchor:item.bottomAnchor constant:-2.0]
+        [label.leadingAnchor constraintEqualToAnchor:item.leadingAnchor constant:7.0],
+        [label.trailingAnchor constraintEqualToAnchor:item.trailingAnchor constant:-7.0],
+        [label.topAnchor constraintEqualToAnchor:iconWell.bottomAnchor constant:5.0],
+        [label.bottomAnchor constraintLessThanOrEqualToAnchor:item.bottomAnchor constant:-5.0]
     ]];
 
     return item;
