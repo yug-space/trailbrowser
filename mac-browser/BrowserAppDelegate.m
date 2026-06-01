@@ -224,6 +224,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [viewMenu addItem:[NSMenuItem separatorItem]];
     [self addMenuItem:@"Use Dark Mode" action:@selector(toggleDarkMode:) key:@"" menu:viewMenu];
     [viewMenu addItem:[NSMenuItem separatorItem]];
+    [self addMenuItem:@"Enter Full Screen"
+               action:@selector(toggleFullScreen:)
+                  key:@"f"
+            modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagControl)
+                 menu:viewMenu];
+    [viewMenu addItem:[NSMenuItem separatorItem]];
     [self addMenuItem:@"Show Bookmarks Bar"
                action:@selector(toggleBookmarkBar:)
                   key:@"b"
@@ -289,6 +295,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (menuItem.action == @selector(toggleDarkMode:)) {
         menuItem.state = TBThemeIsDark() ? NSControlStateValueOn : NSControlStateValueOff;
         menuItem.title = TBThemeIsDark() ? @"Use Light Mode" : @"Use Dark Mode";
+    }
+    if (menuItem.action == @selector(toggleFullScreen:)) {
+        BOOL fullScreen = (self.window.styleMask & NSWindowStyleMaskFullScreen) == NSWindowStyleMaskFullScreen;
+        menuItem.title = fullScreen ? @"Exit Full Screen" : @"Enter Full Screen";
     }
     if (menuItem.action == @selector(reopenClosedTab:)) {
         return self.recentlyClosedTabs.count > 0;
@@ -706,7 +716,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [bookmarkBarHairline.bottomAnchor constraintEqualToAnchor:self.bookmarkBar.bottomAnchor],
         [bookmarkBarHairline.heightAnchor constraintEqualToConstant:1.0],
 
-        [self.bookmarkBarStack.leadingAnchor constraintEqualToAnchor:self.bookmarkBar.leadingAnchor constant:88.0],
+        [self.bookmarkBarStack.leadingAnchor constraintEqualToAnchor:self.bookmarkBar.leadingAnchor constant:14.0],
         [self.bookmarkBarStack.trailingAnchor constraintLessThanOrEqualToAnchor:self.bookmarkBar.trailingAnchor constant:-14.0],
         [self.bookmarkBarStack.centerYAnchor constraintEqualToAnchor:self.bookmarkBar.centerYAnchor],
         [self.bookmarkBarStack.heightAnchor constraintEqualToConstant:26.0],
@@ -940,6 +950,10 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (void)toggleDarkMode:(id)sender {
     (void)sender;
     [self setThemeModeName:(TBThemeIsDark() ? @"light" : @"dark") persist:YES];
+}
+
+- (void)toggleFullScreen:(id)sender {
+    [self.window toggleFullScreen:sender];
 }
 
 - (NSView *)hairlineView {
@@ -2987,6 +3001,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                                                            @"codexEffort": @"TBCodexEffort" };
         NSString *defaultsKey = allowed[key];
         if (defaultsKey) {
+            if ([key isEqualToString:@"codexEffort"] && [value isEqualToString:@"minimal"]) {
+                value = @"low";
+            }
             [[NSUserDefaults standardUserDefaults] setObject:value forKey:defaultsKey];
         }
         return YES;
@@ -3022,7 +3039,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSString *engine = [defaults stringForKey:@"TBAIEngine"] ?: @"codex";
     NSString *codexModel = [defaults stringForKey:@"TBCodexModel"] ?: @"";
     NSString *claudeModel = [defaults stringForKey:@"TBClaudeModel"] ?: @"";
-    NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"";
+    NSString *effort = [defaults stringForKey:@"TBCodexEffort"] ?: @"low";
+    if ([effort isEqualToString:@"minimal"]) effort = @"low";
     NSString *bookmarkBar = self.bookmarkBarVisible ? @"true" : @"false";
     NSString *keepTabsLoaded = [self keepTabsLoaded] ? @"true" : @"false";
     NSString *themeMode = TBThemeModeName(TBThemeCurrentMode());
@@ -3439,6 +3457,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     id bookmarkBarValue = state[@"bookmarkBarVisible"];
     if ([bookmarkBarValue isKindOfClass:NSNumber.class]) {
         BOOL visible = [bookmarkBarValue boolValue];
+        if ([self bookmarkEntries].count == 0) {
+            visible = NO;
+        }
         if (![self bookmarkBarVisibilityUserConfigured] && [self bookmarkEntries].count > 0) {
             visible = YES;
         }
@@ -3981,6 +4002,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (BOOL)initialBookmarkBarVisible {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if ([self bookmarkEntries].count == 0) return NO;
     if ([self bookmarkBarVisibilityUserConfigured]) {
         return [defaults boolForKey:TBBookmarkBarVisibleKey];
     }
@@ -3988,8 +4010,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)syncBookmarkBarVisibilityWithBookmarks {
-    if ([self bookmarkBarVisibilityUserConfigured]) return;
-    BOOL shouldShow = [self bookmarkEntries].count > 0;
+    BOOL hasBookmarks = [self bookmarkEntries].count > 0;
+    if ([self bookmarkBarVisibilityUserConfigured] && hasBookmarks) return;
+    BOOL shouldShow = hasBookmarks;
     if (shouldShow == self.bookmarkBarVisible) return;
 
     if (self.bookmarkBarHeightConstraint) {
@@ -4487,11 +4510,6 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     NSArray<NSDictionary<NSString *, id> *> *bookmarks = [self settingsBookmarkEntries];
     if (bookmarks.count == 0) {
-        NSTextField *empty = [self popoverLabelWithString:@"No bookmarks yet"
-                                                     font:[NSFont systemFontOfSize:12.0 weight:NSFontWeightRegular]
-                                                    color:TBFaint()];
-        [self.bookmarkBarStack addArrangedSubview:empty];
-        [empty.heightAnchor constraintEqualToConstant:24.0].active = YES;
         return;
     }
 
@@ -4980,13 +4998,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)setBookmarkBarVisible:(BOOL)visible persist:(BOOL)persist {
-    self.bookmarkBarVisible = visible;
+    BOOL hasBookmarks = [self bookmarkEntries].count > 0;
+    BOOL effectiveVisible = visible && hasBookmarks;
+    self.bookmarkBarVisible = effectiveVisible;
     if (persist) {
         [[NSUserDefaults standardUserDefaults] setBool:visible forKey:TBBookmarkBarVisibleKey];
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:TBBookmarkBarUserConfiguredKey];
     }
-    self.bookmarkBar.hidden = !visible;
-    self.bookmarkBarHeightConstraint.constant = visible ? 34.0 : 0.0;
+    self.bookmarkBar.hidden = !effectiveVisible;
+    self.bookmarkBarHeightConstraint.constant = effectiveVisible ? 34.0 : 0.0;
     [self reloadBookmarkBarItems];
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
         context.duration = 0.18;
@@ -5915,16 +5935,33 @@ doCommandBySelector:(SEL)commandSelector {
             literal];
 }
 
-- (void)autofillFormsWithAI:(id)sender {
-    (void)sender;
+- (BOOL)requestLooksLikeFormAutofill:(NSString *)request {
+    NSString *lower = request.lowercaseString ?: @"";
+    BOOL mentionsFill = [lower containsString:@"autofill"] ||
+                        [lower containsString:@"auto fill"] ||
+                        [lower containsString:@"fill this"] ||
+                        [lower containsString:@"fill the"] ||
+                        [lower containsString:@"fill form"] ||
+                        [lower isEqualToString:@"fill"];
+    BOOL mentionsForm = [lower containsString:@"form"] ||
+                        [lower containsString:@"field"] ||
+                        [lower containsString:@"application"] ||
+                        [lower containsString:@"apply"];
+    return mentionsFill && mentionsForm;
+}
+
+- (void)autofillFormsWithInstructions:(NSString *)instructions promptIfEmpty:(BOOL)promptIfEmpty {
     if (self.formAutofillInProgress) return;
     if (!self.webView || ![self isHTTPURL:self.webView.URL]) {
         NSBeep();
         return;
     }
 
-    NSString *instructions = [self promptForAutofillInstructions];
-    if (!instructions) return;
+    NSString *trimmedInstructions = [instructions stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
+    if (promptIfEmpty || trimmedInstructions.length == 0) {
+        trimmedInstructions = [self promptForAutofillInstructions];
+        if (!trimmedInstructions) return;
+    }
 
     [self setAutofillWorking:YES];
     [self formSnapshotWithCompletion:^(NSString *snapshot, NSError *snapshotError) {
@@ -5947,7 +5984,7 @@ doCommandBySelector:(SEL)commandSelector {
             return;
         }
 
-        NSString *prompt = [self autofillPromptForInstructions:instructions snapshot:snapshot];
+        NSString *prompt = [self autofillPromptForInstructions:trimmedInstructions snapshot:snapshot];
         [self runAIWithPrompt:prompt enableSearch:NO effortOverride:@"low" completion:^(NSString *output, NSError *error) {
             if (error) {
                 [self setAutofillWorking:NO];
@@ -5978,6 +6015,11 @@ doCommandBySelector:(SEL)commandSelector {
             }];
         }];
     }];
+}
+
+- (void)autofillFormsWithAI:(id)sender {
+    (void)sender;
+    [self autofillFormsWithInstructions:@"" promptIfEmpty:YES];
 }
 
 - (NSString *)htmlEscaped:(NSString *)text {
@@ -6184,6 +6226,12 @@ doCommandBySelector:(SEL)commandSelector {
     }
 
     BOOL editMode = self.assistantModeControl.selectedIndex == 1;
+    if (!editMode && [self requestLooksLikeFormAutofill:request]) {
+        [self clearAssistantPromptField];
+        [self autofillFormsWithInstructions:request promptIfEmpty:NO];
+        return;
+    }
+
     [self clearAssistantPromptField];
     [self setAssistantWorking:YES];
     if (!editMode) {
@@ -6351,8 +6399,8 @@ doCommandBySelector:(SEL)commandSelector {
             ? [NSString stringWithFormat:@"-m %@ ", [self shellQuotedString:model]]
             : @"";
         NSString *effort = [defaults stringForKey:@"TBCodexEffort"];
-        if (effort.length == 0) effort = effortOverride.length > 0 ? effortOverride : @"minimal";
-        if (enableSearch && [effort isEqualToString:@"minimal"]) effort = @"low";
+        if (effort.length == 0) effort = effortOverride.length > 0 ? effortOverride : @"low";
+        if ([effort isEqualToString:@"minimal"]) effort = @"low";
         NSString *effortFlag = [NSString stringWithFormat:@"-c model_reasoning_effort=%@ ",
                                 [self shellQuotedString:effort]];
         command = [pathSetup stringByAppendingFormat:

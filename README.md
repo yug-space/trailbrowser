@@ -54,7 +54,7 @@ and substantially less once background tabs sleep. Reproduce with
 - A 2px accent loading bar
 - Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+Shift+N`, `Cmd+W`,
   `Cmd+Shift+T`, `Cmd+B`, `Cmd+Shift+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`,
-  `Cmd+[`, `Cmd+]`
+  `Cmd+[`, `Cmd+]`, `Ctrl+Cmd+F`
 - A read-only **history MCP server** for querying your browsing history
 
 ## Repository layout

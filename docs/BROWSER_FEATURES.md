@@ -20,7 +20,7 @@ Status keys:
 | Session restore | Done | Persists normal tabs, pinned tab state, recently closed normal tabs, active index, sidebar state, and window frame under Application Support. | `BrowserAppDelegate.m` |
 | History | Done | Local redacted `history.jsonl`, Settings browser with automatic topic clusters, optional cached AI clustering, clear action, read-only MCP server. | `BrowserAppDelegate.m`, `Settings.*`, `mcp-history-server/` |
 | Search and URL autocomplete | Done | Suggestions from typed searches plus browsing history. | `BrowserAppDelegate.m` |
-| Bookmarks | Partial | Star current page, smart native bookmarks bar that appears when bookmarks exist (`Cmd+Shift+B` still toggles explicit preference), toolbar bookmarks popover, Settings search/edit/remove/reorder, and Netscape HTML import/export. Folder hierarchy is not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
+| Bookmarks | Partial | Star current page, smart native bookmarks bar that appears only when bookmarks exist (`Cmd+Shift+B` still records explicit preference for saved bookmarks), toolbar bookmarks popover, Settings search/edit/remove/reorder, and Netscape HTML import/export. Folder hierarchy is not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
 | Downloads | Partial | WebKit download handling, unique filenames, active download popover with progress/cancel, resume data for failed/canceled downloads, local downloads log, Settings list, reveal/clear. Full background download scheduling and rich Finder-style queue controls are not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
 | Page find | Done | `Cmd+F`, next/previous, WebKit find on supported macOS with fallback JS find. | `BrowserAppDelegate.m` |
 | Zoom | Done | Page zoom in/out/reset via View menu. | `BrowserAppDelegate.m` |
@@ -28,7 +28,7 @@ Status keys:
 | Print/export | Done | Open file, print, save page as PDF, view source. | `BrowserAppDelegate.m`, `Makefile` |
 | Website data/privacy | Partial | Clear WebKit cookies/cache/storage, clear local history/download logs, and manage persisted camera/microphone permission decisions by origin. Per-site data browsing is not implemented. | `BrowserAppDelegate.m`, `Settings.*`, `Info.plist` |
 | Cookie import | Done | User-initiated Chrome cookie import through Keychain-gated Chrome Safe Storage, with explicit reporting for partitioned Chrome cookies WebKit cannot preserve. | `ChromeCookieImporter.*` |
-| Assistant | Partial | Ask/Edit, AI-generated pages, and user-confirmed AI form autofill through `codex` or `claude` CLI. Autofill excludes existing field values, passwords, payment fields, hidden fields, OTPs, and file inputs. | `BrowserAppDelegate.m`, `Settings.*` |
+| Assistant | Partial | Ask/Edit, AI-generated pages, and user-confirmed AI form autofill through `codex` or `claude` CLI. Codex runs at `low` effort or higher for v0.135.0 tool compatibility. Autofill excludes existing field values, passwords, payment fields, hidden fields, OTPs, and file inputs. | `BrowserAppDelegate.m`, `Settings.*` |
 | Passwords/autofill | Planned | No custom password store. WebKit/system behavior only. | N/A |
 | Extensions | Planned | No WebExtension host yet. | N/A |
 | Sync | N/A | No telemetry or cloud sync. Chrome cookie import is local-only and user-triggered. | `ChromeCookieImporter.*` |

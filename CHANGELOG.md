@@ -19,6 +19,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for smooth switching, or enable memory saver to sleep older background tabs.
 - AI form autofill appears on pages with safe fillable fields and uses the
   selected Codex/Claude CLI after a user confirmation prompt.
+- View menu now exposes native macOS full-screen mode with `Ctrl+Cmd+F`.
 
 ### Changed
 - Refreshed the native chrome and bundled pages with sleek light and dark
@@ -26,6 +27,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Chrome cookie import now detects partitioned cookies that WebKit cannot
   preserve through its public cookie API and reports them separately from stale
   or unreadable cookies.
+- Bookmark bar items now start at the leading edge, and the bar collapses when
+  there are no saved bookmarks.
+- Codex assistant calls now floor reasoning effort at `low`, avoiding Codex
+  v0.135.0 failures caused by `minimal` effort with enabled tools.
 
 ## [1.0.0] - 2026-05-31
 
