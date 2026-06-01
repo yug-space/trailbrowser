@@ -19,6 +19,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - Refreshed the native chrome and bundled pages with sleek light and dark
   themes, pale/deep surfaces, softer shadows, and a coral accent.
+- Chrome cookie import now detects partitioned cookies that WebKit cannot
+  preserve through its public cookie API and reports them separately from stale
+  or unreadable cookies.
 
 ## [1.0.0] - 2026-05-31
 

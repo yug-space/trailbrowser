@@ -6682,10 +6682,21 @@ doCommandBySelector:(SEL)commandSelector {
                                     (unsigned long)result.imported,
                                     result.imported == 1 ? @"" : @"s",
                                     profile.displayName];
-        if (result.skipped > 0) {
+        NSUInteger staleSkipped = result.skipped;
+        if (result.partitionedSkipped <= staleSkipped) {
+            staleSkipped -= result.partitionedSkipped;
+        } else {
+            staleSkipped = 0;
+        }
+        if (staleSkipped > 0) {
             [message appendFormat:@" Skipped %lu stale or unreadable cookie%@.",
-             (unsigned long)result.skipped,
-             result.skipped == 1 ? @"" : @"s"];
+             (unsigned long)staleSkipped,
+             staleSkipped == 1 ? @"" : @"s"];
+        }
+        if (result.partitionedSkipped > 0) {
+            [message appendFormat:@" Skipped %lu partitioned Chrome cookie%@ that WebKit cannot import through its public cookie API.",
+             (unsigned long)result.partitionedSkipped,
+             result.partitionedSkipped == 1 ? @"" : @"s"];
         }
         if (result.decryptionFailures > 0) {
             [message appendFormat:@" %lu encrypted cookie%@ could not be decrypted by the Chrome Safe Storage key.",

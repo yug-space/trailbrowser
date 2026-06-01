@@ -118,6 +118,11 @@ How it works:
    `v10`/`v11` value (AES-128-CBC, PBKDF2-derived key), and writes the cookies
    into `WKHTTPCookieStore`.
 
+Modern Chrome can store partitioned cookies with a partition key that WebKit's
+public cookie API cannot preserve. TrailBrowser detects those entries, skips
+them, and reports the count; normal first-party sign-in cookies are still
+imported.
+
 It only ever touches the current user's own Chrome data on this machine, never
 sends cookies anywhere, and deletes the temporary database copy when done.
 

@@ -333,9 +333,22 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
     int schemaVersion = [self schemaVersionForDatabase:db];
     BOOL hasExpiresColumn = [self table:@"cookies" hasColumn:@"has_expires" inDatabase:db];
     BOOL hasPersistentColumn = [self table:@"cookies" hasColumn:@"is_persistent" inDatabase:db];
-    NSString *sqlString = (hasExpiresColumn && hasPersistentColumn)
-        ? @"SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite, has_expires, is_persistent FROM cookies"
-        : @"SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite FROM cookies";
+    BOOL hasTopFrameSiteKeyColumn = [self table:@"cookies" hasColumn:@"top_frame_site_key" inDatabase:db];
+    NSString *hasExpiresExpression = hasExpiresColumn
+        ? @"has_expires"
+        : @"CASE WHEN expires_utc > 0 THEN 1 ELSE 0 END";
+    NSString *isPersistentExpression = hasPersistentColumn
+        ? @"is_persistent"
+        : @"CASE WHEN expires_utc > 0 THEN 1 ELSE 0 END";
+    NSString *topFrameSiteKeyExpression = hasTopFrameSiteKeyColumn
+        ? @"top_frame_site_key"
+        : @"''";
+    NSString *sqlString = [NSString stringWithFormat:
+        @"SELECT host_key, name, value, encrypted_value, path, expires_utc, "
+         "is_secure, is_httponly, samesite, %@, %@, %@ FROM cookies",
+         hasExpiresExpression,
+         isPersistentExpression,
+         topFrameSiteKeyExpression];
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sqlString.UTF8String, -1, &stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
@@ -358,8 +371,15 @@ static const double kWindowsEpochToUnixSeconds = 11644473600.0;
         BOOL isSecure = sqlite3_column_int(stmt, 6) != 0;
         BOOL isHTTPOnly = sqlite3_column_int(stmt, 7) != 0;
         int sameSite = sqlite3_column_int(stmt, 8);
-        BOOL hasExpires = hasExpiresColumn ? (sqlite3_column_int(stmt, 9) != 0) : (expiresUtc > 0);
-        BOOL isPersistent = hasPersistentColumn ? (sqlite3_column_int(stmt, 10) != 0) : hasExpires;
+        BOOL hasExpires = sqlite3_column_int(stmt, 9) != 0;
+        BOOL isPersistent = sqlite3_column_int(stmt, 10) != 0;
+        NSString *topFrameSiteKey = [self stringFromColumn:11 of:stmt];
+
+        if (topFrameSiteKey.length > 0) {
+            result.skipped += 1;
+            result.partitionedSkipped += 1;
+            continue;
+        }
 
         if (host.length == 0 || name.length == 0) {
             result.skipped += 1;

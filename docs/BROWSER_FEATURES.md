@@ -27,7 +27,7 @@ Status keys:
 | Page info/security | Partial | Address icon shows HTTPS/HTTP/file/internal state, macOS trust summary, and saved camera/microphone permission state where WebKit exposes it. | `BrowserAppDelegate.m` |
 | Print/export | Done | Open file, print, save page as PDF, view source. | `BrowserAppDelegate.m`, `Makefile` |
 | Website data/privacy | Partial | Clear WebKit cookies/cache/storage, clear local history/download logs, and manage persisted camera/microphone permission decisions by origin. Per-site data browsing is not implemented. | `BrowserAppDelegate.m`, `Settings.*`, `Info.plist` |
-| Cookie import | Done | User-initiated Chrome cookie import through Keychain-gated Chrome Safe Storage. | `ChromeCookieImporter.*` |
+| Cookie import | Done | User-initiated Chrome cookie import through Keychain-gated Chrome Safe Storage, with explicit reporting for partitioned Chrome cookies WebKit cannot preserve. | `ChromeCookieImporter.*` |
 | Assistant | Partial | Ask/Edit and AI-generated pages through `codex` or `claude` CLI. This is intentionally user-triggered and local-process based. | `BrowserAppDelegate.m`, `Settings.*` |
 | Passwords/autofill | Planned | No custom password store. WebKit/system behavior only. | N/A |
 | Extensions | Planned | No WebExtension host yet. | N/A |
