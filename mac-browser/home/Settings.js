@@ -159,6 +159,11 @@ function updateBookmark(oldUrl, title, newUrl) {
     `trailbrowser://update-bookmark?url=${encodeURIComponent(oldUrl)}&title=${encodeURIComponent(title)}&newUrl=${encodeURIComponent(newUrl)}`;
 }
 
+function moveBookmark(url, beforeUrl) {
+  window.location.href =
+    `trailbrowser://move-bookmark?url=${encodeURIComponent(url)}&before=${encodeURIComponent(beforeUrl || "")}`;
+}
+
 function revealDownload(path) {
   window.location.href = `trailbrowser://reveal-download?path=${encodeURIComponent(path)}`;
 }
@@ -261,6 +266,7 @@ function renderBookmarks() {
     if (!filter) return true;
     return `${entry.title || ""} ${entry.url || ""} ${entry.host || ""}`.toLowerCase().includes(filter);
   });
+  const canReorder = !filter && matches.length > 1;
 
   bookmarkList.innerHTML = "";
   if (matches.length === 0) {
@@ -274,6 +280,38 @@ function renderBookmarks() {
   for (const entry of matches) {
     const item = document.createElement("div");
     item.className = "history-item bookmark-item";
+    if (canReorder) {
+      item.classList.add("bookmark-draggable");
+      item.draggable = true;
+      item.addEventListener("dragstart", (event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", entry.url);
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        item.classList.remove("dragging");
+        for (const target of bookmarkList.querySelectorAll(".drop-target")) {
+          target.classList.remove("drop-target");
+        }
+      });
+      item.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        item.classList.add("drop-target");
+      });
+      item.addEventListener("dragleave", () => item.classList.remove("drop-target"));
+      item.addEventListener("drop", (event) => {
+        event.preventDefault();
+        item.classList.remove("drop-target");
+        const draggedUrl = event.dataTransfer.getData("text/plain");
+        if (!draggedUrl || draggedUrl === entry.url) return;
+        const rect = item.getBoundingClientRect();
+        const targetIndex = matches.findIndex((candidate) => candidate.url === entry.url);
+        const afterHalf = event.clientY > rect.top + rect.height / 2;
+        const beforeUrl = afterHalf ? (matches[targetIndex + 1]?.url || "") : entry.url;
+        if (draggedUrl === beforeUrl) return;
+        moveBookmark(draggedUrl, beforeUrl);
+      });
+    }
 
     const meta = document.createElement("div");
     meta.className = "history-time";

@@ -2422,6 +2422,14 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return YES;
     }
 
+    if ([host isEqualToString:@"move-bookmark"]) {
+        NSString *urlString = [self queryValueNamed:@"url" inURL:url];
+        NSString *beforeURLString = [self queryValueNamed:@"before" inURL:url];
+        [self moveBookmarkURLString:urlString beforeURLString:beforeURLString];
+        if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
+        return YES;
+    }
+
     if ([host isEqualToString:@"set-pref"]) {
         NSString *key = [self queryValueNamed:@"key" inURL:url];
         NSString *value = [self queryValueNamed:@"value" inURL:url];
@@ -3509,6 +3517,43 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     [self writeBookmarkEntries:entries];
     [self updateBookmarkButton];
+}
+
+- (void)moveBookmarkURLString:(NSString *)urlString beforeURLString:(NSString *)beforeURLString {
+    if (urlString.length == 0 || [urlString isEqualToString:beforeURLString]) return;
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [[self bookmarkEntries] mutableCopy] ?: [NSMutableArray array];
+    NSUInteger sourceIndex = NSNotFound;
+    NSDictionary<NSString *, id> *movingEntry = nil;
+
+    for (NSUInteger i = 0; i < entries.count; i++) {
+        NSString *candidate = [entries[i][@"url"] isKindOfClass:NSString.class] ? entries[i][@"url"] : @"";
+        if ([candidate isEqualToString:urlString]) {
+            sourceIndex = i;
+            movingEntry = entries[i];
+            break;
+        }
+    }
+    if (sourceIndex == NSNotFound || !movingEntry) return;
+
+    [entries removeObjectAtIndex:sourceIndex];
+
+    NSUInteger destinationIndex = entries.count;
+    if (beforeURLString.length > 0) {
+        for (NSUInteger i = 0; i < entries.count; i++) {
+            NSString *candidate = [entries[i][@"url"] isKindOfClass:NSString.class] ? entries[i][@"url"] : @"";
+            if ([candidate isEqualToString:beforeURLString]) {
+                destinationIndex = i;
+                break;
+            }
+        }
+    }
+
+    NSMutableDictionary<NSString *, id> *updated = [movingEntry mutableCopy];
+    updated[@"updatedAt"] = [[self historyDateFormatter] stringFromDate:[NSDate date]];
+    [entries insertObject:updated atIndex:destinationIndex];
+    [self writeBookmarkEntries:entries];
+    [self setStatusText:@"Bookmark order updated"];
 }
 
 - (NSString *)stringByStrippingHTMLTags:(NSString *)html {

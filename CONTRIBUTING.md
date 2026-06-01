@@ -62,7 +62,7 @@ end to end, for example:
 - Tabs: open (`Cmd+T` or the `+`), switch, hover-to-close, tab sleeping.
 - Home page: Google vs AI search toggle, quick links.
 - Settings: open via the sidebar or `Cmd+,`; Sync Chrome Cookies.
-- Browser basics: bookmarks bar/popover, Settings management, bookmark
+- Browser basics: bookmarks bar/popover, Settings management/reordering, bookmark
   import/export, downloads popover and reveal, private tabs (`Cmd+Shift+N`),
   site permissions, find, zoom, page info, print/PDF.
 - Page assistant: Ask and Edit (requires the `codex` or `claude` CLI on `PATH`).

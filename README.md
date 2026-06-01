@@ -38,7 +38,7 @@ and substantially less once background tabs sleep. Reproduce with
   site permissions, bookmarks, downloads, history, and AI engine preferences
 - History with automatic topic clusters and optional AI-cluster refresh
 - Bookmarks with an optional bookmarks bar, toolbar access, Settings management,
-  and HTML import/export
+  reordering, and HTML import/export
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
   slept), and hover-to-close
 - **Efficient memory & process use:** WebKit shares content processes across

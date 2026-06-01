@@ -441,6 +441,23 @@ button.danger:hover {
   grid-template-columns: 132px minmax(0, 1fr) auto;
 }
 
+.bookmark-draggable {
+  cursor: grab;
+}
+
+.bookmark-draggable:active {
+  cursor: grabbing;
+}
+
+.bookmark-draggable.dragging {
+  opacity: 0.55;
+}
+
+.bookmark-draggable.drop-target {
+  border-color: rgba(247, 107, 28, 0.36);
+  background: rgba(247, 107, 28, 0.06);
+}
+
 .download-active {
   border-color: rgba(247, 107, 28, 0.22);
   background: rgba(247, 107, 28, 0.045);

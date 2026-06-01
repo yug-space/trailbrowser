@@ -20,7 +20,7 @@ Status keys:
 | Session restore | Done | Persists normal tabs, active index, sidebar state, and window frame under Application Support. | `BrowserAppDelegate.m` |
 | History | Done | Local redacted `history.jsonl`, Settings browser with automatic topic clusters, optional cached AI clustering, clear action, read-only MCP server. | `BrowserAppDelegate.m`, `Settings.*`, `mcp-history-server/` |
 | Search and URL autocomplete | Done | Suggestions from typed searches plus browsing history. | `BrowserAppDelegate.m` |
-| Bookmarks | Partial | Star current page, optional native bookmarks bar (`Cmd+Shift+B`), toolbar bookmarks popover, Settings search/edit/remove, and Netscape HTML import/export. Folder hierarchy and drag reordering are not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
+| Bookmarks | Partial | Star current page, optional native bookmarks bar (`Cmd+Shift+B`), toolbar bookmarks popover, Settings search/edit/remove/reorder, and Netscape HTML import/export. Folder hierarchy is not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
 | Downloads | Partial | WebKit download handling, unique filenames, active download popover with progress/cancel, resume data for failed/canceled downloads, local downloads log, Settings list, reveal/clear. Full background download scheduling and rich Finder-style queue controls are not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
 | Page find | Done | `Cmd+F`, next/previous, WebKit find on supported macOS with fallback JS find. | `BrowserAppDelegate.m` |
 | Zoom | Done | Page zoom in/out/reset via View menu. | `BrowserAppDelegate.m` |
@@ -52,7 +52,7 @@ Status keys:
 
 - More per-site controls where WebKit exposes native hooks: notifications,
   geolocation, popups, autoplay, and per-origin website data inspection.
-- Bookmark folders and drag reordering.
+- Bookmark folders.
 - Richer download queue controls, including sorting, retry policy, and completed
   file cleanup.
 - Password/autofill posture: decide whether TrailBrowser relies entirely on
