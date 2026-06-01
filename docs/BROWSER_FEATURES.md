@@ -15,9 +15,9 @@ Status keys:
 | Area | Status | Current implementation | Main files |
 |------|--------|------------------------|------------|
 | Navigation | Done | Address/search bar, back/forward/reload/home, command-click background tabs, popup tabs. | `BrowserAppDelegate.m` |
-| Tabs | Done | Sidebar tabs, close/new, favicon/title, live tab switching, memory-pressure sleeping, `Cmd+Opt+Tab` switcher. | `BrowserAppDelegate.m`, `BrowserTabViews.*` |
+| Tabs | Done | Sidebar tabs, close/new, favicon/title, live tab switching, memory-pressure sleeping, `Cmd+Opt+Tab` switcher, and `Cmd+Shift+T` closed-tab restore. | `BrowserAppDelegate.m`, `BrowserTabViews.*` |
 | Private browsing | Partial | Private tabs use `WKWebsiteDataStore nonPersistentDataStore` and are excluded from history/session restore. Separate private windows and policy controls are not implemented. | `BrowserTab.h`, `BrowserAppDelegate.m` |
-| Session restore | Done | Persists normal tabs, active index, sidebar state, and window frame under Application Support. | `BrowserAppDelegate.m` |
+| Session restore | Done | Persists normal tabs, recently closed normal tabs, active index, sidebar state, and window frame under Application Support. | `BrowserAppDelegate.m` |
 | History | Done | Local redacted `history.jsonl`, Settings browser with automatic topic clusters, optional cached AI clustering, clear action, read-only MCP server. | `BrowserAppDelegate.m`, `Settings.*`, `mcp-history-server/` |
 | Search and URL autocomplete | Done | Suggestions from typed searches plus browsing history. | `BrowserAppDelegate.m` |
 | Bookmarks | Partial | Star current page, optional native bookmarks bar (`Cmd+Shift+B`), toolbar bookmarks popover, Settings search/edit/remove/reorder, and Netscape HTML import/export. Folder hierarchy is not implemented. | `BrowserAppDelegate.m`, `Settings.*` |
@@ -40,6 +40,8 @@ Status keys:
   on `BrowserTab`, not hidden in UI state.
 - Persist only what should survive restart. Private tabs, private history, and
   temporary WebKit data must not be written to TrailBrowser state files.
+- Recently closed tab restore follows the same rule: save normal tabs only and
+  never add private tabs to the reopen stack.
 - Add new storage paths to `writeBrowserStateRunning:` so contributors and MCP
   tooling can discover them.
 - Keep user-sensitive actions explicit and user-triggered: cookie import,

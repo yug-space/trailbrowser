@@ -14,6 +14,7 @@
 @property (nonatomic, strong) dispatch_source_t memoryPressureSource;
 @property (nonatomic, strong) NSMutableArray<BrowserTab *> *preloadQueue;
 @property (nonatomic, strong) NSMutableSet<WKWebView *> *preloadingWebViews;
+@property (nonatomic, strong) NSMutableArray<NSDictionary<NSString *, id> *> *recentlyClosedTabs;
 @property (nonatomic, strong) NSMutableSet<WKDownload *> *activeDownloads;
 @property (nonatomic, strong) NSMapTable<WKDownload *, NSMutableDictionary<NSString *, id> *> *downloadMetadata;
 @property (nonatomic, strong) NSTimer *downloadRefreshTimer;
@@ -53,6 +54,7 @@
 static const NSInteger kMaxLiveTabs = NSIntegerMax;
 static const NSInteger kMaxConcurrentPreloads = 2;
 static const NSInteger kMaxVisibleSwitcherTabs = 10;
+static const NSInteger kMaxRecentlyClosedTabs = 20;
 static const unsigned short kTabKeyCode = 48;
 static const unsigned short kEscapeKeyCode = 53;
 static const unsigned short kReturnKeyCode = 36;
@@ -75,6 +77,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self buildMenu];
     [self buildWindow];
     [self startMemoryPressureMonitor];
+    [self restoreRecentlyClosedTabsFromDictionary:[self browserStateDictionary]];
 
     NSArray<NSString *> *urlArgs = [self launchURLArguments];
     if (urlArgs.count > 0) {
@@ -170,6 +173,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagShift)
                  menu:navMenu];
     [self addMenuItem:@"Close Tab" action:@selector(closeCurrentTab:) key:@"w" menu:navMenu];
+    [self addMenuItem:@"Reopen Closed Tab"
+               action:@selector(reopenClosedTab:)
+                  key:@"t"
+            modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagShift)
+                 menu:navMenu];
     [self addMenuItem:@"Bookmark This Page" action:@selector(toggleBookmarkCurrentPage:) key:@"d" menu:navMenu];
     [self addMenuItem:@"Switch Tabs"
                action:@selector(showTabSwitcherFromMenu:)
@@ -256,11 +264,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         menuItem.state = self.bookmarkBarVisible ? NSControlStateValueOn : NSControlStateValueOff;
         menuItem.title = self.bookmarkBarVisible ? @"Hide Bookmarks Bar" : @"Show Bookmarks Bar";
     }
+    if (menuItem.action == @selector(reopenClosedTab:)) {
+        return self.recentlyClosedTabs.count > 0;
+    }
     return YES;
 }
 
 - (void)buildWindow {
     self.tabs = [NSMutableArray array];
+    self.recentlyClosedTabs = [NSMutableArray array];
     self.activeTabIndex = -1;
     self.sidebarVisible = YES;
     self.bookmarkBarVisible = [[NSUserDefaults standardUserDefaults] boolForKey:@"TBBookmarkBarVisible"];
@@ -2103,6 +2115,57 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self closeTabAtIndex:self.activeTabIndex];
 }
 
+- (NSDictionary<NSString *, id> *)recentlyClosedEntryForTab:(BrowserTab *)tab {
+    if (!tab || tab.privateBrowsing) return nil;
+
+    NSString *urlString = tab.webView.URL.absoluteString ?: tab.urlString ?: @"";
+    if (urlString.length == 0 || [urlString hasPrefix:@"view-source:"]) return nil;
+
+    NSString *title = tab.webView.title.length ? tab.webView.title : (tab.title ?: @"");
+    return @{
+        @"url": urlString,
+        @"title": title ?: @"",
+        @"closedAt": [[self historyDateFormatter] stringFromDate:[NSDate date]]
+    };
+}
+
+- (void)recordRecentlyClosedTab:(BrowserTab *)tab {
+    NSDictionary<NSString *, id> *entry = [self recentlyClosedEntryForTab:tab];
+    if (!entry) return;
+    if (!self.recentlyClosedTabs) self.recentlyClosedTabs = [NSMutableArray array];
+
+    [self.recentlyClosedTabs addObject:entry];
+    while ((NSInteger)self.recentlyClosedTabs.count > kMaxRecentlyClosedTabs) {
+        [self.recentlyClosedTabs removeObjectAtIndex:0];
+    }
+}
+
+- (void)reopenClosedTab:(id)sender {
+    (void)sender;
+    if (self.recentlyClosedTabs.count == 0) {
+        NSBeep();
+        return;
+    }
+
+    NSDictionary<NSString *, id> *entry = self.recentlyClosedTabs.lastObject;
+    [self.recentlyClosedTabs removeLastObject];
+
+    NSString *urlString = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+    if (urlString.length == 0) {
+        NSBeep();
+        return;
+    }
+
+    BrowserTab *tab = [self newTabWithURLString:urlString select:YES];
+    NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+    if (title.length > 0) {
+        tab.title = title;
+        [self reloadSidebarRowForTab:tab];
+    }
+    [self setStatusText:@"Reopened closed tab"];
+    if (!self.restoringSession) [self writeBrowserStateRunning:YES];
+}
+
 - (void)closeTabAtIndex:(NSInteger)closingIndex {
     if (self.tabs.count == 0) return;
     if (closingIndex < 0 || closingIndex >= (NSInteger)self.tabs.count) closingIndex = self.activeTabIndex;
@@ -2110,6 +2173,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     BOOL closingActive = (closingIndex == self.activeTabIndex);
     BrowserTab *closingTab = self.tabs[(NSUInteger)closingIndex];
+    [self recordRecentlyClosedTab:closingTab];
 
     [self.preloadQueue removeObject:closingTab];
     if (closingTab.webView) [self.preloadingWebViews removeObject:closingTab.webView];
@@ -2779,6 +2843,35 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     return entries;
 }
 
+- (NSArray<NSDictionary<NSString *, id> *> *)sanitizedRecentlyClosedTabsFromStateValue:(id)value {
+    NSArray *items = [value isKindOfClass:NSArray.class] ? value : @[];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+
+    for (id item in items) {
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary<NSString *, id> *entry = item;
+        NSString *urlString = [entry[@"url"] isKindOfClass:NSString.class] ? entry[@"url"] : @"";
+        if (urlString.length == 0 || [urlString hasPrefix:@"view-source:"]) continue;
+        NSString *title = [entry[@"title"] isKindOfClass:NSString.class] ? entry[@"title"] : @"";
+        NSString *closedAt = [entry[@"closedAt"] isKindOfClass:NSString.class] ? entry[@"closedAt"] : @"";
+        [entries addObject:@{
+            @"url": urlString,
+            @"title": title ?: @"",
+            @"closedAt": closedAt ?: @""
+        }];
+    }
+
+    if ((NSInteger)entries.count > kMaxRecentlyClosedTabs) {
+        NSRange range = NSMakeRange(entries.count - kMaxRecentlyClosedTabs, kMaxRecentlyClosedTabs);
+        return [entries subarrayWithRange:range];
+    }
+    return entries;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)stateRecentlyClosedTabEntries {
+    return self.recentlyClosedTabs ? [self.recentlyClosedTabs copy] : @[];
+}
+
 - (NSInteger)stateActiveTabIndex {
     NSInteger stateIndex = 0;
     for (NSInteger i = 0; i < (NSInteger)self.tabs.count; i++) {
@@ -2831,6 +2924,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             [self.window.contentView layoutSubtreeIfNeeded];
         }
     }
+
+    [self restoreRecentlyClosedTabsFromDictionary:state];
+}
+
+- (void)restoreRecentlyClosedTabsFromDictionary:(NSDictionary<NSString *, id> *)state {
+    NSArray<NSDictionary<NSString *, id> *> *entries = [self sanitizedRecentlyClosedTabsFromStateValue:state[@"recentlyClosedTabs"]];
+    self.recentlyClosedTabs = [entries mutableCopy];
 }
 
 - (BOOL)restorePreviousSessionIfAvailable {
@@ -2876,6 +2976,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         @"downloadResumeDataDirectory": [self downloadResumeDataDirectoryPath],
         @"permissionsFile": [self permissionsFilePath],
         @"tabs": [self stateTabEntries],
+        @"recentlyClosedTabs": [self stateRecentlyClosedTabEntries],
         @"activeTabIndex": @([self stateActiveTabIndex]),
         @"sidebarVisible": @(self.sidebarVisible),
         @"bookmarkBarVisible": @(self.bookmarkBarVisible),

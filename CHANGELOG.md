@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Reopen Closed Tab (`Cmd+Shift+T`) restores recently closed normal tabs and
+  keeps private tabs out of the persisted reopen stack.
+
 ## [1.0.0] - 2026-05-31
 
 First public release.

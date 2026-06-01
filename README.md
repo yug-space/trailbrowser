@@ -31,7 +31,7 @@ and substantially less once background tabs sleep. Reproduce with
 
 - A flat, near-black UI with a warm-orange accent and smooth control animations
 - A clean one-line top bar: highlighted sidebar toggle, centered address/search
-  pill, reload, downloads/bookmarks controls, **Ask**, and a settings gear
+  pill, reload, downloads/bookmarks controls, **Ask AI**, and a settings gear
 - A native **home page** with a Google ⇄ AI search toggle and quick links
 - **First-run onboarding** that offers to sync cookies from Chrome
 - A **settings page** (`Cmd+,`) for syncing Chrome cookies, privacy controls,
@@ -40,15 +40,16 @@ and substantially less once background tabs sleep. Reproduce with
 - Bookmarks with an optional bookmarks bar, toolbar access, Settings management,
   reordering, and HTML import/export
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
-  slept), and hover-to-close
+  slept), hover-to-close, and `Cmd+Shift+T` closed-tab restore
 - **Efficient memory & process use:** WebKit shares content processes across
   tabs over one shared data store; recently-used tabs stay live (instant switch
   back) while older and background tabs are slept under a budget and on system
   memory pressure — far lighter than a Chromium renderer-per-tab
 - A built-in **page assistant** (Ask / Edit) powered by the `codex` or `claude` CLI
-- A 2px accent loading bar and a status dot
+- A 2px accent loading bar
 - Keyboard shortcuts: `Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+Shift+N`, `Cmd+W`,
-  `Cmd+B`, `Cmd+Shift+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`, `Cmd+[`, `Cmd+]`
+  `Cmd+Shift+T`, `Cmd+B`, `Cmd+Shift+B`, `Cmd+D`, `Cmd+F`, `Cmd+G`, `Cmd+,`,
+  `Cmd+[`, `Cmd+]`
 - A read-only **history MCP server** for querying your browsing history
 
 ## Repository layout
