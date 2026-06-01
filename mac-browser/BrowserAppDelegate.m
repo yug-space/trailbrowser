@@ -5619,6 +5619,7 @@ doCommandBySelector:(SEL)commandSelector {
 
 - (void)assistantModeChanged:(id)sender {
     (void)sender;
+    [self closeAssistantResult:nil];
     BOOL editMode = self.assistantModeControl.selectedIndex == 1;
     NSString *text = editMode ? @"Change this page" : @"Ask about this page";
     self.assistantPromptField.placeholderAttributedString =
