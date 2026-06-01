@@ -9,6 +9,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Reopen Closed Tab (`Cmd+Shift+T`) restores recently closed normal tabs and
   keeps private tabs out of the persisted reopen stack.
+- Sidebar tab context menu and Navigate menu actions for reload, duplicate,
+  close other tabs, and close tabs to the right.
 
 ## [1.0.0] - 2026-05-31
 

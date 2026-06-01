@@ -40,7 +40,8 @@ and substantially less once background tabs sleep. Reproduce with
 - Bookmarks with an optional bookmarks bar, toolbar access, Settings management,
   reordering, and HTML import/export
 - Sidebar tabs: a live count, per-tab status (active accent bar, dimmed when
-  slept), hover-to-close, and `Cmd+Shift+T` closed-tab restore
+  slept), hover-to-close, `Cmd+Shift+T` closed-tab restore, and right-click
+  actions for duplicate / bulk close
 - **Efficient memory & process use:** WebKit shares content processes across
   tabs over one shared data store; recently-used tabs stay live (instant switch
   back) while older and background tabs are slept under a budget and on system

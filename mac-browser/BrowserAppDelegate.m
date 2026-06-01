@@ -9,7 +9,7 @@
 #import "TBControls.h"
 #import "TBTheme.h"
 
-@interface BrowserAppDelegate ()
+@interface BrowserAppDelegate () <NSMenuDelegate>
 @property (nonatomic, assign) NSInteger tabActivationCounter;
 @property (nonatomic, strong) dispatch_source_t memoryPressureSource;
 @property (nonatomic, strong) NSMutableArray<BrowserTab *> *preloadQueue;
@@ -33,6 +33,7 @@
 @property (nonatomic, assign) BOOL bookmarkBarVisible;
 @property (nonatomic, strong) NSButton *downloadsButton;
 @property (nonatomic, strong) NSPopover *downloadsPopover;
+@property (nonatomic, strong) NSMenu *tabContextMenu;
 @property (nonatomic, strong) NSVisualEffectView *findBar;
 @property (nonatomic, strong) NSTextField *findField;
 @property (nonatomic, strong) NSTextField *findStatusLabel;
@@ -173,6 +174,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             modifiers:(NSEventModifierFlagCommand | NSEventModifierFlagShift)
                  menu:navMenu];
     [self addMenuItem:@"Close Tab" action:@selector(closeCurrentTab:) key:@"w" menu:navMenu];
+    [self addMenuItem:@"Duplicate Tab" action:@selector(duplicateCurrentTab:) key:@"" menu:navMenu];
+    [self addMenuItem:@"Close Other Tabs" action:@selector(closeOtherTabsForCurrentTab:) key:@"" menu:navMenu];
+    [self addMenuItem:@"Close Tabs to the Right" action:@selector(closeTabsToRightForCurrentTab:) key:@"" menu:navMenu];
     [self addMenuItem:@"Reopen Closed Tab"
                action:@selector(reopenClosedTab:)
                   key:@"t"
@@ -266,6 +270,29 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     }
     if (menuItem.action == @selector(reopenClosedTab:)) {
         return self.recentlyClosedTabs.count > 0;
+    }
+    if (menuItem.action == @selector(duplicateCurrentTab:)) {
+        return self.activeTabIndex >= 0 && self.activeTabIndex < (NSInteger)self.tabs.count;
+    }
+    if (menuItem.action == @selector(closeOtherTabsForCurrentTab:)) {
+        return self.tabs.count > 1 && self.activeTabIndex >= 0;
+    }
+    if (menuItem.action == @selector(closeTabsToRightForCurrentTab:)) {
+        return self.activeTabIndex >= 0 && self.activeTabIndex < (NSInteger)self.tabs.count - 1;
+    }
+    if (menuItem.action == @selector(reloadTabFromMenu:) ||
+        menuItem.action == @selector(duplicateTabFromMenu:) ||
+        menuItem.action == @selector(closeTabFromMenu:)) {
+        NSInteger row = menuItem.tag;
+        return row >= 0 && row < (NSInteger)self.tabs.count;
+    }
+    if (menuItem.action == @selector(closeOtherTabsFromMenu:)) {
+        NSInteger row = menuItem.tag;
+        return row >= 0 && row < (NSInteger)self.tabs.count && self.tabs.count > 1;
+    }
+    if (menuItem.action == @selector(closeTabsToRightFromMenu:)) {
+        NSInteger row = menuItem.tag;
+        return row >= 0 && row < (NSInteger)self.tabs.count - 1;
     }
     return YES;
 }
@@ -495,6 +522,9 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.tabTable.focusRingType = NSFocusRingTypeNone;
     self.tabTable.dataSource = self;
     self.tabTable.delegate = self;
+    self.tabContextMenu = [[NSMenu alloc] initWithTitle:@"Tab"];
+    self.tabContextMenu.delegate = self;
+    self.tabTable.menu = self.tabContextMenu;
 
     if (@available(macOS 11.0, *)) self.tabTable.style = NSTableViewStylePlain;
 
@@ -1908,18 +1938,32 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                               URLString:(NSString *)urlString
                                  select:(BOOL)select
                         privateBrowsing:(BOOL)privateBrowsing {
+    return [self newTabWithConfiguration:configuration
+                               URLString:urlString
+                                  select:select
+                         privateBrowsing:privateBrowsing
+                             insertIndex:(NSInteger)self.tabs.count];
+}
+
+- (BrowserTab *)newTabWithConfiguration:(WKWebViewConfiguration *)configuration
+                              URLString:(NSString *)urlString
+                                 select:(BOOL)select
+                        privateBrowsing:(BOOL)privateBrowsing
+                            insertIndex:(NSInteger)insertIndex {
     BrowserTab *tab = [[BrowserTab alloc] init];
     tab.title = @"New Tab";
     tab.urlString = urlString ?: [self homeURLString];
     tab.privateBrowsing = privateBrowsing;
     if (configuration) tab.webView = [self createWebViewWithConfiguration:configuration];
-    [self.tabs addObject:tab];
+
+    if (insertIndex < 0 || insertIndex > (NSInteger)self.tabs.count) insertIndex = (NSInteger)self.tabs.count;
+    if (!select && self.activeTabIndex >= insertIndex) self.activeTabIndex += 1;
+    [self.tabs insertObject:tab atIndex:(NSUInteger)insertIndex];
     [self.tabTable reloadData];
     [self updateTabCount];
 
-    NSInteger index = (NSInteger)self.tabs.count - 1;
     if (select) {
-        [self selectTabAtIndex:index];
+        [self selectTabAtIndex:insertIndex];
     } else if (configuration == nil && !privateBrowsing) {
         [self preloadTab:tab];
         [self enforceLiveTabBudget];
@@ -2115,10 +2159,100 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self closeTabAtIndex:self.activeTabIndex];
 }
 
+- (NSString *)URLStringForTab:(BrowserTab *)tab {
+    return tab.webView.URL.absoluteString ?: tab.urlString ?: @"";
+}
+
+- (void)reloadTabAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.tabs.count) {
+        NSBeep();
+        return;
+    }
+
+    BrowserTab *tab = self.tabs[(NSUInteger)index];
+    if (tab.webView) {
+        [tab.webView reload];
+        [self setStatusText:@"Reloading tab"];
+        return;
+    }
+
+    [self preloadTab:tab];
+    [self setStatusText:@"Reloading tab"];
+}
+
+- (BrowserTab *)duplicateTabAtIndex:(NSInteger)index select:(BOOL)select {
+    if (index < 0 || index >= (NSInteger)self.tabs.count) {
+        NSBeep();
+        return nil;
+    }
+
+    BrowserTab *source = self.tabs[(NSUInteger)index];
+    NSString *urlString = [self URLStringForTab:source];
+    if (urlString.length == 0) urlString = [self homeURLString];
+
+    NSInteger insertIndex = MIN(index + 1, (NSInteger)self.tabs.count);
+    WKWebViewConfiguration *configuration = source.privateBrowsing ? [self privateWebViewConfiguration] : nil;
+    BrowserTab *duplicate = [self newTabWithConfiguration:configuration
+                                                URLString:urlString
+                                                   select:select
+                                          privateBrowsing:source.privateBrowsing
+                                              insertIndex:insertIndex];
+    duplicate.title = source.title.length ? source.title : @"New Tab";
+    duplicate.favicon = source.favicon;
+    duplicate.faviconURLString = source.faviconURLString;
+    [self reloadSidebarRowForTab:duplicate];
+    [self setStatusText:@"Duplicated tab"];
+    return duplicate;
+}
+
+- (void)duplicateCurrentTab:(id)sender {
+    (void)sender;
+    [self duplicateTabAtIndex:self.activeTabIndex select:YES];
+}
+
+- (void)closeTabsExceptIndex:(NSInteger)keepIndex {
+    if (keepIndex < 0 || keepIndex >= (NSInteger)self.tabs.count) {
+        NSBeep();
+        return;
+    }
+    if (self.tabs.count <= 1) return;
+
+    [self selectTabAtIndex:keepIndex];
+    for (NSInteger i = (NSInteger)self.tabs.count - 1; i >= 0; i--) {
+        if (i == keepIndex) continue;
+        [self closeTabAtIndex:i];
+        if (i < keepIndex) keepIndex -= 1;
+    }
+    [self setStatusText:@"Closed other tabs"];
+}
+
+- (void)closeTabsToRightOfIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.tabs.count) {
+        NSBeep();
+        return;
+    }
+    if (index >= (NSInteger)self.tabs.count - 1) return;
+
+    for (NSInteger i = (NSInteger)self.tabs.count - 1; i > index; i--) {
+        [self closeTabAtIndex:i];
+    }
+    [self setStatusText:@"Closed tabs to the right"];
+}
+
+- (void)closeOtherTabsForCurrentTab:(id)sender {
+    (void)sender;
+    [self closeTabsExceptIndex:self.activeTabIndex];
+}
+
+- (void)closeTabsToRightForCurrentTab:(id)sender {
+    (void)sender;
+    [self closeTabsToRightOfIndex:self.activeTabIndex];
+}
+
 - (NSDictionary<NSString *, id> *)recentlyClosedEntryForTab:(BrowserTab *)tab {
     if (!tab || tab.privateBrowsing) return nil;
 
-    NSString *urlString = tab.webView.URL.absoluteString ?: tab.urlString ?: @"";
+    NSString *urlString = [self URLStringForTab:tab];
     if (urlString.length == 0 || [urlString hasPrefix:@"view-source:"]) return nil;
 
     NSString *title = tab.webView.title.length ? tab.webView.title : (tab.title ?: @"");
@@ -5665,6 +5799,79 @@ doCommandBySelector:(SEL)commandSelector {
 }
 
 #pragma mark - Sidebar tabs
+
+- (NSMenuItem *)tabContextMenuItemWithTitle:(NSString *)title
+                                     action:(SEL)action
+                                        row:(NSInteger)row
+                                    enabled:(BOOL)enabled {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
+    item.target = self;
+    item.tag = row;
+    item.enabled = enabled;
+    return item;
+}
+
+- (void)menuNeedsUpdate:(NSMenu *)menu {
+    if (menu != self.tabContextMenu) return;
+
+    [menu removeAllItems];
+
+    NSInteger row = self.tabTable.clickedRow;
+    BOOL hasTab = row >= 0 && row < (NSInteger)self.tabs.count;
+    if (hasTab) {
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Reload Tab"
+                                                 action:@selector(reloadTabFromMenu:)
+                                                    row:row
+                                                enabled:YES]];
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Duplicate Tab"
+                                                 action:@selector(duplicateTabFromMenu:)
+                                                    row:row
+                                                enabled:YES]];
+        [menu addItem:[NSMenuItem separatorItem]];
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Close Tab"
+                                                 action:@selector(closeTabFromMenu:)
+                                                    row:row
+                                                enabled:YES]];
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Close Other Tabs"
+                                                 action:@selector(closeOtherTabsFromMenu:)
+                                                    row:row
+                                                enabled:self.tabs.count > 1]];
+        [menu addItem:[self tabContextMenuItemWithTitle:@"Close Tabs to the Right"
+                                                 action:@selector(closeTabsToRightFromMenu:)
+                                                    row:row
+                                                enabled:row < (NSInteger)self.tabs.count - 1]];
+        [menu addItem:[NSMenuItem separatorItem]];
+    }
+
+    [menu addItem:[self tabContextMenuItemWithTitle:@"New Tab"
+                                             action:@selector(newTab:)
+                                                row:row
+                                            enabled:YES]];
+    [menu addItem:[self tabContextMenuItemWithTitle:@"Reopen Closed Tab"
+                                             action:@selector(reopenClosedTab:)
+                                                row:row
+                                            enabled:self.recentlyClosedTabs.count > 0]];
+}
+
+- (void)reloadTabFromMenu:(id)sender {
+    [self reloadTabAtIndex:[sender tag]];
+}
+
+- (void)duplicateTabFromMenu:(id)sender {
+    [self duplicateTabAtIndex:[sender tag] select:YES];
+}
+
+- (void)closeTabFromMenu:(id)sender {
+    [self closeTabAtIndex:[sender tag]];
+}
+
+- (void)closeOtherTabsFromMenu:(id)sender {
+    [self closeTabsExceptIndex:[sender tag]];
+}
+
+- (void)closeTabsToRightFromMenu:(id)sender {
+    [self closeTabsToRightOfIndex:[sender tag]];
+}
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
     (void)tableView;
