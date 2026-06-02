@@ -2118,6 +2118,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (WKWebView *)createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration {
     WKWebViewConfiguration *config = configuration ?: [self defaultWebViewConfiguration];
     [self configureForLowMemory:config];
+    [self configurePasskeyPolicyForConfiguration:config];
     WKWebView *webView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:config];
     webView.translatesAutoresizingMaskIntoConstraints = NO;
     webView.navigationDelegate = self;
@@ -2190,6 +2191,42 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     configuration.suppressesIncrementalRendering = YES;
     configuration.allowsAirPlayForMediaPlayback = NO;
     configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
+}
+
+- (NSString *)disabledPublicKeyCredentialScript {
+    return
+        @"(() => {"
+         "if (window.__trailbrowserPublicKeyCredentialsDisabled) return;"
+         "window.__trailbrowserPublicKeyCredentialsDisabled = true;"
+         "const unavailable = () => new DOMException('Passkeys are unavailable in this TrailBrowser build. Use another sign-in method.', 'NotAllowedError');"
+         "const publicKeyRequest = (options) => options && typeof options === 'object' && options.publicKey;"
+         "const credentials = navigator.credentials;"
+         "if (credentials) {"
+         "const originalGet = typeof credentials.get === 'function' ? credentials.get.bind(credentials) : null;"
+         "const originalCreate = typeof credentials.create === 'function' ? credentials.create.bind(credentials) : null;"
+         "const install = (name, fn) => {"
+         "try { Object.defineProperty(credentials, name, { configurable: true, value: fn }); return; } catch (_) {}"
+         "try { Object.defineProperty(Object.getPrototypeOf(credentials), name, { configurable: true, value: fn }); } catch (_) {}"
+         "};"
+         "if (originalGet) install('get', (options) => publicKeyRequest(options) ? Promise.reject(unavailable()) : originalGet(options));"
+         "if (originalCreate) install('create', (options) => publicKeyRequest(options) ? Promise.reject(unavailable()) : originalCreate(options));"
+         "}"
+         "if (window.PublicKeyCredential) {"
+         "const no = () => Promise.resolve(false);"
+         "try { Object.defineProperty(window.PublicKeyCredential, 'isUserVerifyingPlatformAuthenticatorAvailable', { configurable: true, value: no }); } catch (_) {}"
+         "try { Object.defineProperty(window.PublicKeyCredential, 'isConditionalMediationAvailable', { configurable: true, value: no }); } catch (_) {}"
+         "}"
+         "})()";
+}
+
+- (void)configurePasskeyPolicyForConfiguration:(WKWebViewConfiguration *)configuration {
+    if ([self hasBrowserPasskeyEntitlement]) return;
+    WKUserContentController *controller = configuration.userContentController ?: [[WKUserContentController alloc] init];
+    WKUserScript *script = [[WKUserScript alloc] initWithSource:[self disabledPublicKeyCredentialScript]
+                                                  injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                               forMainFrameOnly:NO];
+    [controller addUserScript:script];
+    configuration.userContentController = controller;
 }
 
 - (WKWebViewConfiguration *)defaultWebViewConfiguration {
@@ -3834,7 +3871,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
                 @"supported": @YES,
                 @"state": @"needsEntitlement",
                 @"label": @"Needs signed build",
-                @"message": @"This build is not signed with Apple's browser passkey entitlement. Passkeys require an approved browser build.",
+                @"message": @"This build is not signed with Apple's browser passkey entitlement, so TrailBrowser blocks passkey prompts and asks sites to fall back to password sign-in.",
                 @"canRequest": @NO,
                 @"requestInProgress": @NO
             };
