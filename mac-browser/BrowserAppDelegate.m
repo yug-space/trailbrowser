@@ -1,6 +1,8 @@
 #import "BrowserAppDelegate.h"
 
+#import <AuthenticationServices/AuthenticationServices.h>
 #import <QuartzCore/QuartzCore.h>
+#import <Security/Security.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import "BrowserTab.h"
@@ -51,6 +53,8 @@
 @property (nonatomic, assign) BOOL pageHasFillableForms;
 @property (nonatomic, assign) BOOL formAutofillInProgress;
 @property (nonatomic, copy, nullable) NSString *pendingAutofillInstructionsAfterNavigation;
+@property (nonatomic, strong, nullable) id passkeyCredentialManager;
+@property (nonatomic, assign) BOOL passkeyAccessRequestInProgress;
 @property (nonatomic, assign) BOOL restoringSession;
 @property (nonatomic, assign) BOOL suppressTabSelectionChange;
 @property (nonatomic, strong) NSView *rootView;
@@ -79,6 +83,7 @@ static NSString * const TBBookmarkBarVisibleKey = @"TBBookmarkBarVisible";
 static NSString * const TBBookmarkBarUserConfiguredKey = @"TBBookmarkBarUserConfigured";
 static NSString * const TBThemeModeDefaultsKey = @"TBThemeMode";
 static NSString * const TBKeepTabsLoadedKey = @"TBKeepTabsLoaded";
+static NSString * const TBPasskeyAccessPromptedKey = @"TBPasskeyAccessPrompted";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -93,6 +98,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self buildWindow];
     [self startMemoryPressureMonitor];
     [self restoreRecentlyClosedTabsFromDictionary:[self browserStateDictionary]];
+    [self requestPasskeyAccessAtLaunchIfNeeded];
 
     NSArray<NSString *> *urlArgs = [self launchURLArguments];
     if (urlArgs.count > 0) {
@@ -2923,6 +2929,11 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return YES;
     }
 
+    if ([host isEqualToString:@"request-passkey-access"]) {
+        [self requestPasskeyAccessFromSettings];
+        return YES;
+    }
+
     if ([host isEqualToString:@"clear-history"]) {
         [self clearBrowsingHistory];
         if (self.webView) [self loadNativeSettingsPageInWebView:self.webView];
@@ -3115,6 +3126,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsBookmarksScript]];
     html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsDownloadsScript]];
     html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsPermissionsScript]];
+    html = [html stringByReplacingOccurrencesOfString:@"</head>" withString:[self settingsPasskeysScript]];
 
     self.renderingInternalPage = YES;
     [webView loadHTMLString:html baseURL:[NSURL URLWithString:[self settingsURLString]]];
@@ -3788,6 +3800,159 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     [self clearDownloadHistory];
     [self clearSitePermissions];
     [self clearWebsiteDataReloadSettings:YES];
+}
+
+#pragma mark - Passkeys
+
+- (nullable id)passkeyManager {
+    if (@available(macOS 13.3, *)) {
+        if (!self.passkeyCredentialManager) {
+            self.passkeyCredentialManager = [[ASAuthorizationWebBrowserPublicKeyCredentialManager alloc] init];
+        }
+        return self.passkeyCredentialManager;
+    }
+    return nil;
+}
+
+- (BOOL)hasBrowserPasskeyEntitlement {
+    SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
+    if (!task) return NO;
+
+    CFTypeRef value = SecTaskCopyValueForEntitlement(task,
+                                                     CFSTR("com.apple.developer.web-browser.public-key-credential"),
+                                                     NULL);
+    CFRelease(task);
+    BOOL entitled = value && CFGetTypeID(value) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)value);
+    if (value) CFRelease(value);
+    return entitled;
+}
+
+- (NSDictionary<NSString *, id> *)passkeyStatusDictionary {
+    if (@available(macOS 13.3, *)) {
+        if (![self hasBrowserPasskeyEntitlement]) {
+            return @{
+                @"supported": @YES,
+                @"state": @"needsEntitlement",
+                @"label": @"Needs signed build",
+                @"message": @"This build is not signed with Apple's browser passkey entitlement. Passkeys require an approved browser build.",
+                @"canRequest": @NO,
+                @"requestInProgress": @NO
+            };
+        }
+
+        ASAuthorizationWebBrowserPublicKeyCredentialManager *manager =
+            (ASAuthorizationWebBrowserPublicKeyCredentialManager *)[self passkeyManager];
+        ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationState state =
+            manager.authorizationStateForPlatformCredentials;
+
+        NSString *stateKey = @"notDetermined";
+        NSString *label = @"Not allowed yet";
+        NSString *message = @"Allow TrailBrowser to use passkeys stored in iCloud Keychain and credential manager apps.";
+        BOOL canRequest = YES;
+
+        if (state == ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationStateAuthorized) {
+            stateKey = @"authorized";
+            label = @"Allowed";
+            message = @"WebKit can ask for your fingerprint, face, or screen lock when a website requests a passkey.";
+            canRequest = NO;
+        } else if (state == ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationStateDenied) {
+            stateKey = @"denied";
+            label = @"Blocked";
+            message = @"Allow TrailBrowser in System Settings > Privacy & Security > Passkeys Access for Web Browsers.";
+            canRequest = YES;
+        }
+
+        return @{
+            @"supported": @YES,
+            @"state": stateKey,
+            @"label": label,
+            @"message": message,
+            @"canRequest": @(canRequest && !self.passkeyAccessRequestInProgress),
+            @"requestInProgress": @(self.passkeyAccessRequestInProgress)
+        };
+    }
+
+    return @{
+        @"supported": @NO,
+        @"state": @"unsupported",
+        @"label": @"Unsupported",
+        @"message": @"Passkeys in browser apps require macOS 13.3 or later.",
+        @"canRequest": @NO,
+        @"requestInProgress": @NO
+    };
+}
+
+- (NSString *)settingsPasskeysScript {
+    NSDictionary<NSString *, id> *status = [self passkeyStatusDictionary];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:status options:0 error:nil];
+    NSString *jsonString = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : @"{}";
+    return [NSString stringWithFormat:@"<script>window.__tbPasskeys=%@;</script></head>", jsonString ?: @"{}"];
+}
+
+- (void)requestPasskeyAccessAtLaunchIfNeeded {
+    if (@available(macOS 13.3, *)) {
+        if (![self hasBrowserPasskeyEntitlement]) return;
+        if ([[NSUserDefaults standardUserDefaults] boolForKey:TBPasskeyAccessPromptedKey]) return;
+        ASAuthorizationWebBrowserPublicKeyCredentialManager *manager =
+            (ASAuthorizationWebBrowserPublicKeyCredentialManager *)[self passkeyManager];
+        if (manager.authorizationStateForPlatformCredentials !=
+            ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationStateNotDetermined) {
+            return;
+        }
+
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:TBPasskeyAccessPromptedKey];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self requestPasskeyAccessReloadSettings:NO];
+        });
+    }
+}
+
+- (void)requestPasskeyAccessFromSettings {
+    [self requestPasskeyAccessReloadSettings:YES];
+}
+
+- (void)requestPasskeyAccessReloadSettings:(BOOL)reloadSettings {
+    if (@available(macOS 13.3, *)) {
+        if (![self hasBrowserPasskeyEntitlement]) {
+            [self setStatusText:@"Passkeys need an entitled browser build"];
+            if (reloadSettings) [self reloadSettingsIfVisible];
+            NSBeep();
+            return;
+        }
+        if (self.passkeyAccessRequestInProgress) return;
+
+        ASAuthorizationWebBrowserPublicKeyCredentialManager *manager =
+            (ASAuthorizationWebBrowserPublicKeyCredentialManager *)[self passkeyManager];
+        ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationState state =
+            manager.authorizationStateForPlatformCredentials;
+        if (state == ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationStateAuthorized) {
+            [self setStatusText:@"Passkeys allowed"];
+            if (reloadSettings) [self reloadSettingsIfVisible];
+            return;
+        }
+
+        self.passkeyAccessRequestInProgress = YES;
+        if (reloadSettings) [self reloadSettingsIfVisible];
+        [self setStatusText:@"Requesting passkey access"];
+
+        [manager requestAuthorizationForPublicKeyCredentials:
+         ^(ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationState authorizationState) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.passkeyAccessRequestInProgress = NO;
+                if (authorizationState == ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationStateAuthorized) {
+                    [self setStatusText:@"Passkeys allowed"];
+                } else if (authorizationState == ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationStateDenied) {
+                    [self setStatusText:@"Passkeys blocked in System Settings"];
+                } else {
+                    [self setStatusText:@"Passkey access not set"];
+                }
+                if (reloadSettings) [self reloadSettingsIfVisible];
+            });
+        }];
+    } else {
+        [self setStatusText:@"Passkeys require macOS 13.3+"];
+        NSBeep();
+    }
 }
 
 #pragma mark - Site permissions

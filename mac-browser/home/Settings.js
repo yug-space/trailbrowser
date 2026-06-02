@@ -20,6 +20,9 @@ const downloadList = document.getElementById("download-list");
 const clearDownloadsButton = document.getElementById("clear-downloads");
 const clearSiteDataButton = document.getElementById("clear-site-data");
 const clearAllDataButton = document.getElementById("clear-all-data");
+const passkeyStatus = document.getElementById("passkey-status");
+const passkeyMessage = document.getElementById("passkey-message");
+const requestPasskeysButton = document.getElementById("request-passkeys");
 const permissionList = document.getElementById("permission-list");
 const permissionFilter = document.getElementById("permission-filter");
 const clearPermissionsButton = document.getElementById("clear-permissions");
@@ -139,6 +142,24 @@ keepTabsLoadedToggle.checked = window.__tbKeepTabsLoaded !== false;
 keepTabsLoadedToggle.addEventListener("change", () => {
   setPref("keepTabsLoaded", keepTabsLoadedToggle.checked ? "1" : "0");
 });
+
+const passkeys = window.__tbPasskeys && typeof window.__tbPasskeys === "object" ? window.__tbPasskeys : {};
+if (passkeyStatus) {
+  passkeyStatus.textContent = passkeys.label || "Unknown";
+  passkeyStatus.dataset.state = passkeys.state || "unknown";
+}
+if (passkeyMessage) {
+  passkeyMessage.textContent = passkeys.message || "Passkey status is unavailable.";
+}
+if (requestPasskeysButton) {
+  requestPasskeysButton.disabled = !passkeys.canRequest;
+  requestPasskeysButton.textContent = passkeys.requestInProgress ? "Requesting..." : "Allow Passkeys";
+  requestPasskeysButton.addEventListener("click", () => {
+    requestPasskeysButton.disabled = true;
+    requestPasskeysButton.textContent = "Requesting...";
+    window.location.href = "trailbrowser://request-passkey-access";
+  });
+}
 
 const historyEntries = Array.isArray(window.__tbHistory) ? window.__tbHistory : [];
 const historyClusterPayload = window.__tbHistoryClusters && typeof window.__tbHistoryClusters === "object"

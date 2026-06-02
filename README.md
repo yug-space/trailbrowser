@@ -143,6 +143,22 @@ If a page hosts the form inside a known embedded form provider such as Airtable,
 Google Forms, Typeform, Tally, or Jotform, TrailBrowser opens the embedded form
 directly first so WebKit can inspect and fill the actual fields.
 
+## Passkeys
+
+TrailBrowser requests macOS passkey access for browser apps through
+AuthenticationServices. When access is allowed, WebKit can handle website
+passkey sign-in and registration prompts using the system fingerprint, face, or
+screen-lock flow. Distributed builds need Apple's browser passkey entitlement
+(`com.apple.developer.web-browser.public-key-credential`) for full support.
+Local builds do not embed that restricted entitlement by default because macOS
+will refuse to launch an app signed with it unless the signing identity is
+approved for the entitlement.
+
+```sh
+make CODESIGN_IDENTITY="Developer ID Application: Example" \
+     CODESIGN_ENTITLEMENTS=mac-browser/TrailBrowser.entitlements
+```
+
 ## History MCP Server
 
 TrailBrowser writes its own browsing history to:

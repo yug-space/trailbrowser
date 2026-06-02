@@ -327,6 +327,44 @@ button.danger:hover {
   gap: 10px;
 }
 
+.status-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-pill {
+  min-width: 88px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: var(--switch-fill);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-pill[data-state="authorized"] {
+  border-color: rgba(70, 150, 105, 0.28);
+  background: rgba(70, 150, 105, 0.1);
+  color: #2f8654;
+}
+
+.status-pill[data-state="denied"] {
+  border-color: rgba(198, 62, 79, 0.28);
+  background: rgba(198, 62, 79, 0.08);
+  color: var(--danger);
+}
+
+.status-pill[data-state="needsEntitlement"] {
+  border-color: rgba(236, 107, 91, 0.28);
+  background: rgba(236, 107, 91, 0.08);
+  color: var(--accent);
+}
+
 .history-head {
   display: flex;
   align-items: center;
@@ -634,7 +672,8 @@ button.danger:hover {
     flex-direction: column;
   }
 
-  .privacy-actions {
+  .privacy-actions,
+  .status-actions {
     flex-direction: column;
   }
 

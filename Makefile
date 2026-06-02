@@ -24,8 +24,11 @@ APP_HEADERS = mac-browser/BrowserAppDelegate.h \
 APP_HOME_RESOURCES = mac-browser/home/Home.html mac-browser/home/Home.css mac-browser/home/Home.js \
                      mac-browser/home/Settings.html mac-browser/home/Settings.css mac-browser/home/Settings.js \
                      mac-browser/home/Onboarding.html mac-browser/home/Onboarding.css mac-browser/home/Onboarding.js
-APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security -framework QuartzCore -framework UniformTypeIdentifiers
+APP_FRAMEWORKS = -framework Cocoa -framework WebKit -framework Security -framework QuartzCore -framework UniformTypeIdentifiers -framework AuthenticationServices
 APP_LIBS = -lsqlite3
+APP_PASSKEY_ENTITLEMENTS = mac-browser/TrailBrowser.entitlements
+CODESIGN_IDENTITY ?=
+CODESIGN_ENTITLEMENTS ?=
 
 APP_ICON = assets/TrailBrowser.icns
 
@@ -34,6 +37,13 @@ MCP_DIR = mcp-history-server
 all: mac                           # Build the native macOS WebKit browser app
 
 mac: $(APP_BIN) $(APP_PLIST) mac-resources mac-icon
+	@if [ -n "$(CODESIGN_IDENTITY)" ]; then \
+	  entitlements=""; \
+	  if [ -n "$(CODESIGN_ENTITLEMENTS)" ]; then entitlements="--entitlements $(CODESIGN_ENTITLEMENTS)"; fi; \
+	  codesign --force --sign "$(CODESIGN_IDENTITY)" $$entitlements $(APP_BUNDLE); \
+	else \
+	  rm -rf $(APP_BUNDLE)/Contents/_CodeSignature; \
+	fi
 
 $(APP_BIN): $(APP_SOURCES) $(APP_HEADERS)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
