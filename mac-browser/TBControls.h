@@ -32,6 +32,9 @@ typedef NS_ENUM(NSInteger, TBPillStyle) {
 - (void)refreshTheme;
 @end
 
+@interface TBAddressField : NSTextField
+@end
+
 @interface TBSegmentedControl : NSControl
 @property (nonatomic, copy) NSArray<NSString *> *titles;
 @property (nonatomic, assign) NSInteger selectedIndex;

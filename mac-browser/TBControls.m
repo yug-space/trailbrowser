@@ -232,6 +232,60 @@
 
 @end
 
+@interface TBAddressFieldCell : NSTextFieldCell
+@end
+
+@implementation TBAddressFieldCell
+
+- (NSRect)centeredTextRectForBounds:(NSRect)rect {
+    NSRect textRect = [super drawingRectForBounds:rect];
+    NSSize textSize = [self cellSizeForBounds:rect];
+    textRect.origin.y = NSMidY(rect) - textSize.height / 2.0;
+    textRect.size.height = textSize.height;
+    return NSIntegralRectWithOptions(textRect, NSAlignMinXOutward | NSAlignMinYOutward |
+                                               NSAlignWidthOutward | NSAlignHeightOutward);
+}
+
+- (NSRect)drawingRectForBounds:(NSRect)rect {
+    return [self centeredTextRectForBounds:rect];
+}
+
+- (void)editWithFrame:(NSRect)rect
+               inView:(NSView *)controlView
+               editor:(NSText *)textObj
+             delegate:(id)delegate
+                event:(NSEvent *)event {
+    [super editWithFrame:[self centeredTextRectForBounds:rect]
+                  inView:controlView
+                  editor:textObj
+                delegate:delegate
+                   event:event];
+}
+
+- (void)selectWithFrame:(NSRect)rect
+                 inView:(NSView *)controlView
+                 editor:(NSText *)textObj
+               delegate:(id)delegate
+                  start:(NSInteger)start
+                 length:(NSInteger)length {
+    [super selectWithFrame:[self centeredTextRectForBounds:rect]
+                    inView:controlView
+                    editor:textObj
+                  delegate:delegate
+                     start:start
+                    length:length];
+}
+
+@end
+
+@implementation TBAddressField
+
++ (Class)cellClass {
+    return TBAddressFieldCell.class;
+}
+
+@end
+
 @implementation TBSegmentedControl
 
 - (instancetype)initWithFrame:(NSRect)frameRect {

@@ -458,7 +458,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (@available(macOS 10.14, *)) self.siteInfoButton.contentTintColor = TBFaint();
     [self.addressContainer addSubview:self.siteInfoButton];
 
-    self.addressField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    self.addressField = [[TBAddressField alloc] initWithFrame:NSZeroRect];
     self.addressField.translatesAutoresizingMaskIntoConstraints = NO;
     self.addressField.bezeled = NO;
     self.addressField.bordered = NO;
@@ -466,6 +466,13 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     self.addressField.focusRingType = NSFocusRingTypeNone;
     self.addressField.editable = YES;
     self.addressField.selectable = YES;
+    self.addressField.usesSingleLineMode = YES;
+    self.addressField.maximumNumberOfLines = 1;
+    self.addressField.alignment = NSTextAlignmentLeft;
+    self.addressField.cell.usesSingleLineMode = YES;
+    self.addressField.cell.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    self.addressField.cell.scrollable = YES;
+    self.addressField.cell.truncatesLastVisibleLine = NO;
     self.addressField.textColor = TBText();
     self.addressField.font = [NSFont systemFontOfSize:13.5 weight:NSFontWeightRegular];
     self.addressField.placeholderAttributedString =
@@ -649,7 +656,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
     NSLayoutConstraint *addressCenter = [self.addressContainer.centerXAnchor constraintEqualToAnchor:toolbar.centerXAnchor];
     addressCenter.priority = NSLayoutPriorityDefaultHigh - 1;
-    NSLayoutConstraint *addressWidth = [self.addressContainer.widthAnchor constraintEqualToConstant:620.0];
+    NSLayoutConstraint *addressWidth = [self.addressContainer.widthAnchor constraintEqualToConstant:760.0];
     addressWidth.priority = NSLayoutPriorityDefaultHigh;
 
     [NSLayoutConstraint activateConstraints:@[
@@ -692,6 +699,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         [self.addressField.leadingAnchor constraintEqualToAnchor:self.siteInfoButton.trailingAnchor constant:6.0],
         [self.addressField.trailingAnchor constraintEqualToAnchor:self.addressContainer.trailingAnchor constant:-12.0],
         [self.addressField.centerYAnchor constraintEqualToAnchor:self.addressContainer.centerYAnchor],
+        [self.addressField.heightAnchor constraintEqualToConstant:24.0],
 
         [self.settingsButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-14.0],
         [self.settingsButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
@@ -1037,6 +1045,12 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (void)setStatusText:(NSString *)text {
     self.addressContainer.toolTip = text.length ? text : @"Ready";
+}
+
+- (void)setAddressFieldDisplayString:(NSString *)text {
+    NSString *value = text ?: @"";
+    self.addressField.stringValue = value;
+    self.addressField.toolTip = value.length ? value : @"Search or enter website name";
 }
 
 - (NSButton *)toolbarButtonWithSymbol:(NSString *)symbol
@@ -1756,7 +1770,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     NSDictionary<NSString *, NSString *> *suggestion = self.addressSuggestions[(NSUInteger)index];
     NSString *input = suggestion[@"input"] ?: suggestion[@"url"] ?: @"";
     if (input.length == 0) return;
-    self.addressField.stringValue = input;
+    [self setAddressFieldDisplayString:input];
     [self hideAddressSuggestionsPanel];
     self.userEditingAddress = NO;
     [self loadURLString:input];
@@ -2493,7 +2507,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if (self.webView.URL) {
         [self syncAddressBarWithWebView];
     } else if (tab.urlString.length > 0) {
-        self.addressField.stringValue = tab.urlString;
+        [self setAddressFieldDisplayString:tab.urlString];
     }
     [self updateControls];
     [self setStatusText:self.webView.loading ? @"Loading" : @"Ready"];
@@ -2855,7 +2869,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         return;
     }
 
-    self.addressField.stringValue = url.absoluteString;
+    [self setAddressFieldDisplayString:url.absoluteString];
     BrowserTab *tab = [self activeTab];
     tab.urlString = url.absoluteString;
     if (!tab.privateBrowsing) [self recordSearchInputIfNeeded:input resolvedURL:url];
@@ -3118,7 +3132,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         tab.favicon = nil;
         [self reloadSidebarRowForTab:tab];
     }
-    self.addressField.stringValue = [self homeURLString];
+    [self setAddressFieldDisplayString:[self homeURLString]];
     self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
     NSString *html = [[self nativeResourceHTMLNamed:@"Home"]
@@ -3153,7 +3167,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         tab.favicon = nil;
         [self reloadSidebarRowForTab:tab];
     }
-    self.addressField.stringValue = [self settingsURLString];
+    [self setAddressFieldDisplayString:[self settingsURLString]];
     [self setStatusText:@"Ready"];
 
     NSString *html = [[self nativeResourceHTMLNamed:@"Settings"]
@@ -3177,7 +3191,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         tab.favicon = nil;
         [self reloadSidebarRowForTab:tab];
     }
-    self.addressField.stringValue = [self onboardingURLString];
+    [self setAddressFieldDisplayString:[self onboardingURLString]];
     self.renderingInternalPage = YES;
     [self setStatusText:@"Ready"];
     NSString *html = [[self nativeResourceHTMLNamed:@"Onboarding"]
@@ -6508,7 +6522,7 @@ doCommandBySelector:(SEL)commandSelector {
         tab.favicon = nil;
         [self reloadSidebarRowForTab:tab];
     }
-    self.addressField.stringValue = trimmed;
+    [self setAddressFieldDisplayString:trimmed];
     [self setStatusText:@"Loading"];
     [self.webView loadHTMLString:[self statusPageHTMLForQuery:trimmed
                                                         title:@"Generating a page for"
@@ -7544,20 +7558,20 @@ doCommandBySelector:(SEL)commandSelector {
 
     BrowserTab *tab = [self activeTab];
     if ([self isHomeURLString:tab.urlString]) {
-        self.addressField.stringValue = [self homeURLString];
+        [self setAddressFieldDisplayString:[self homeURLString]];
         return;
     }
     if ([self isSettingsURLString:tab.urlString]) {
-        self.addressField.stringValue = [self settingsURLString];
+        [self setAddressFieldDisplayString:[self settingsURLString]];
         return;
     }
     if ([self isOnboardingURLString:tab.urlString]) {
-        self.addressField.stringValue = [self onboardingURLString];
+        [self setAddressFieldDisplayString:[self onboardingURLString]];
         return;
     }
 
     NSURL *url = self.webView.URL;
-    if (url) self.addressField.stringValue = url.absoluteString;
+    if (url) [self setAddressFieldDisplayString:url.absoluteString];
 }
 
 - (BOOL)isAddressFieldBeingEdited {
