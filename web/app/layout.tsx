@@ -21,14 +21,14 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TrailBrowser — Native macOS browser for open tabs",
+  title: "TrailBrowser — your browser, one switcher away",
   description:
-    "TrailBrowser is an open-source native macOS browser built with AppKit and WebKit, featuring sidebar tabs, local AI assistance, passkeys, bookmarks, history clustering, and no telemetry.",
+    "TrailBrowser is a local-first native macOS browser built with AppKit and WebKit. Fast tabs, bookmarks, passkeys, local history, and an optional AI page assistant.",
   icons: { icon: "/assets/trailbrowser-icon.svg" },
   openGraph: {
-    title: "TrailBrowser — Native macOS browser for open tabs",
+    title: "TrailBrowser — your browser, one switcher away",
     description:
-      "Open-source AppKit + WebKit browser with sidebar tabs, local AI assistance, passkeys, bookmarks, history clustering, and no telemetry.",
+      "Local-first native macOS browser with fast tabs, bookmarks, passkeys, local history, and an optional AI page assistant.",
     url: "https://github.com/yug-space/trailbrowser",
     siteName: "TrailBrowser",
   },
