@@ -21,6 +21,15 @@ make mcp-install
 make run-history-mcp
 ```
 
+Public website:
+
+```sh
+cd web
+npm install
+npm run dev
+npm run build
+```
+
 ## Project layout
 
 See [AGENTS.md](AGENTS.md) for a full file-by-file map and architecture notes,
@@ -34,6 +43,7 @@ In short:
   (themed controls + palette), `ChromeCookieImporter.{h,m}`, and bundled pages
   under `home/`.
 - `mcp-history-server/` — the read-only history MCP server.
+- `web/` — the Next.js App Router public website used for Vercel deployment.
 
 ## Coding style
 
@@ -51,6 +61,8 @@ In short:
   alone will not link).
 - **CSS/JS:** 2-space indentation; keep the near-black + orange theme variables
   at the top of each stylesheet in sync with `TBTheme`.
+- **Website:** keep the `web/` site clean, white themed, and feature-focused.
+  Do not commit `.next/`, `node_modules/`, screenshots, or generated output.
 
 ## Testing your change
 
@@ -66,6 +78,8 @@ end to end, for example:
   import/export, downloads popover and reveal, private tabs (`Cmd+Shift+N`),
   site permissions, find, zoom, page info, print/PDF.
 - Page assistant: Ask and Edit (requires the `codex` or `claude` CLI on `PATH`).
+- Website: from `web/`, run `npm run lint`, `npm run build`, and check desktop
+  plus mobile layouts before opening a PR.
 
 Note what you tested in your PR description.
 

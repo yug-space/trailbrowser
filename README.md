@@ -13,6 +13,7 @@ engine — no Electron, no bundled Chromium.
 
 - Objective-C + AppKit for the native window, toolbar, and sidebar
 - `WKWebView` (system WebKit) for real website rendering
+- `web/` contains the public Next.js website for Vercel deployment
 
 The app is the native UI *around* WebKit; it is not a rendering engine. In a
 12-tab benchmark with every tab preloaded and kept live, it used roughly **half**
@@ -71,6 +72,7 @@ and substantially less once background tabs sleep. Reproduce with
 | `mac-browser/home/` | Bundled internal pages: `Home.*`, `Settings.*`, `Onboarding.*` |
 | `mac-browser/Info.plist` | macOS app bundle metadata |
 | `mcp-history-server/server.mjs` | Read-only MCP server for TrailBrowser history |
+| `web/` | Next.js public website, configured for Vercel |
 | `Makefile` | Builds the app and runs the MCP server |
 
 See [AGENTS.md](AGENTS.md) for architecture and conventions, and
@@ -87,6 +89,17 @@ make            # builds TrailBrowser.app
 make run-browser
 make clean
 ```
+
+Website:
+
+```sh
+cd web
+npm install
+npm run dev
+npm run build
+```
+
+For Vercel, use `web/` as the project root.
 
 Type in the top address bar and press Return: full URLs and domain-like inputs
 open as websites, while phrases become Google searches. The home page's Google ⇄

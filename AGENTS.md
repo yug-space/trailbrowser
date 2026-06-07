@@ -10,9 +10,11 @@ WebKit engine — no Electron, no bundled Chromium.
 - **mac-browser** — Objective-C + AppKit + WebKit (`WKWebView`): sidebar tabs,
   page assistant, cookie import, settings, onboarding.
 - **mcp-history-server** — a read-only Node MCP server exposing browsing history.
+- **web** — Next.js App Router public website for Vercel.
 
-The app is the native UI *around* WebKit; it is not a rendering engine. (There
-is intentionally no Linux/GTK build — the repo is macOS + MCP only.)
+The app is the native UI *around* WebKit; it is not a rendering engine. There
+is intentionally no Linux/GTK build; the repo is macOS app, local MCP server,
+and public website.
 
 ## Repository layout
 
@@ -33,6 +35,7 @@ mac-browser/
     Settings.{html,css,js}   # trailbrowser://settings (sync cookies, AI engine)
     Onboarding.{html,css,js} # trailbrowser://welcome (first-run)
 mcp-history-server/server.mjs# Read-only history MCP server
+web/                         # Next.js public website
 Makefile                     # Builds the macOS app + MCP helpers
 ```
 
@@ -42,6 +45,15 @@ Makefile                     # Builds the macOS app + MCP helpers
 make            # builds TrailBrowser.app
 make run-browser
 make clean
+```
+
+Website:
+
+```sh
+cd web
+npm install
+npm run dev
+npm run build
 ```
 
 The macOS app links `Cocoa`, `WebKit`, `Security`, `QuartzCore`, and `sqlite3`
@@ -62,6 +74,9 @@ the changed flow (navigation, tabs, assistant, settings, cookie import).
 - **New bundled page?** Add `Foo.{html,css,js}` under `mac-browser/home/`, list
   the files in `APP_HOME_RESOURCES` in the Makefile, and route it through the
   `trailbrowser://` scheme (see below).
+- **Website changes:** edit the Next.js App Router files under `web/app/`.
+  Keep the public site white, sleek, and product-focused. Verify with
+  `npm run lint` and `npm run build` from `web/`.
 - Match the surrounding style: 4-space indent, ARC (`-fobjc-arc`), `NS_ASSUME_NONNULL`
   in headers (mark genuinely-nullable properties `nullable`).
 - Keep the controller's WebKit/navigation/history/assistant **behavior** stable
