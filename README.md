@@ -150,11 +150,13 @@ AuthenticationServices. When access is allowed, WebKit can handle website
 passkey sign-in and registration prompts using the system fingerprint, face, or
 screen-lock flow. Distributed builds need Apple's browser passkey entitlement
 (`com.apple.developer.web-browser.public-key-credential`) for full support.
-Local builds do not embed that restricted entitlement by default because macOS
-will refuse to launch an app signed with it unless the signing identity is
-approved for the entitlement. Unentitled local builds suppress WebAuthn public
-key credential calls at document start so websites fall back to password or
-alternate sign-in instead of looping in a nearby-device Bluetooth passkey flow.
+Local builds are ad-hoc signed with that entitlement by default so the app can
+request browser passkey access during development. If macOS rejects an
+unapproved entitlement on your machine, rebuild with
+`LOCAL_PASSKEY_ENTITLEMENTS=0`; TrailBrowser still lets WebKit try passkey flows
+instead of blocking `PublicKeyCredential`. If a site gets stuck in a
+nearby-device Bluetooth passkey loop, turn off passkeys from Settings > Privacy
+to make that site fall back to another sign-in method.
 
 ```sh
 make CODESIGN_IDENTITY="Developer ID Application: Example" \

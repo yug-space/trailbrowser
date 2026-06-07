@@ -29,6 +29,7 @@ APP_LIBS = -lsqlite3
 APP_PASSKEY_ENTITLEMENTS = mac-browser/TrailBrowser.entitlements
 CODESIGN_IDENTITY ?=
 CODESIGN_ENTITLEMENTS ?=
+LOCAL_PASSKEY_ENTITLEMENTS ?= 1
 
 APP_ICON = assets/TrailBrowser.icns
 
@@ -39,8 +40,11 @@ all: mac                           # Build the native macOS WebKit browser app
 mac: $(APP_BIN) $(APP_PLIST) mac-resources mac-icon
 	@if [ -n "$(CODESIGN_IDENTITY)" ]; then \
 	  entitlements=""; \
-	  if [ -n "$(CODESIGN_ENTITLEMENTS)" ]; then entitlements="--entitlements $(CODESIGN_ENTITLEMENTS)"; fi; \
+	  if [ -n "$(CODESIGN_ENTITLEMENTS)" ]; then entitlements="--entitlements $(CODESIGN_ENTITLEMENTS)"; \
+	  elif [ "$(LOCAL_PASSKEY_ENTITLEMENTS)" = "1" ]; then entitlements="--entitlements $(APP_PASSKEY_ENTITLEMENTS)"; fi; \
 	  codesign --force --sign "$(CODESIGN_IDENTITY)" $$entitlements $(APP_BUNDLE); \
+	elif [ "$(LOCAL_PASSKEY_ENTITLEMENTS)" = "1" ]; then \
+	  codesign --force --sign - --entitlements $(APP_PASSKEY_ENTITLEMENTS) $(APP_BUNDLE); \
 	else \
 	  rm -rf $(APP_BUNDLE)/Contents/_CodeSignature; \
 	fi

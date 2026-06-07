@@ -23,6 +23,7 @@ const clearAllDataButton = document.getElementById("clear-all-data");
 const passkeyStatus = document.getElementById("passkey-status");
 const passkeyMessage = document.getElementById("passkey-message");
 const requestPasskeysButton = document.getElementById("request-passkeys");
+const passkeysEnabledToggle = document.getElementById("passkeys-enabled-toggle");
 const permissionList = document.getElementById("permission-list");
 const permissionFilter = document.getElementById("permission-filter");
 const clearPermissionsButton = document.getElementById("clear-permissions");
@@ -153,11 +154,23 @@ if (passkeyMessage) {
 }
 if (requestPasskeysButton) {
   requestPasskeysButton.disabled = !passkeys.canRequest;
-  requestPasskeysButton.textContent = passkeys.requestInProgress ? "Requesting..." : "Allow Passkeys";
+  requestPasskeysButton.textContent = passkeys.requestInProgress
+    ? "Requesting..."
+    : passkeys.canRequest
+      ? "Allow Passkeys"
+      : passkeys.state === "authorized"
+        ? "Allowed"
+        : "Unavailable";
   requestPasskeysButton.addEventListener("click", () => {
     requestPasskeysButton.disabled = true;
     requestPasskeysButton.textContent = "Requesting...";
     window.location.href = "trailbrowser://request-passkey-access";
+  });
+}
+if (passkeysEnabledToggle) {
+  passkeysEnabledToggle.checked = !Boolean(passkeys.disabled || window.__tbPasskeysDisabled);
+  passkeysEnabledToggle.addEventListener("change", () => {
+    setPref("passkeysEnabled", passkeysEnabledToggle.checked ? "1" : "0");
   });
 }
 

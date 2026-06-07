@@ -84,6 +84,7 @@ static NSString * const TBBookmarkBarUserConfiguredKey = @"TBBookmarkBarUserConf
 static NSString * const TBThemeModeDefaultsKey = @"TBThemeMode";
 static NSString * const TBKeepTabsLoadedKey = @"TBKeepTabsLoaded";
 static NSString * const TBPasskeyAccessPromptedKey = @"TBPasskeyAccessPrompted";
+static NSString * const TBPasskeysDisabledKey = @"TBPasskeysDisabled";
 
 static void *BrowserProgressContext = &BrowserProgressContext;
 static void *BrowserURLContext = &BrowserURLContext;
@@ -2241,7 +2242,7 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 }
 
 - (void)configurePasskeyPolicyForConfiguration:(WKWebViewConfiguration *)configuration {
-    if ([self hasBrowserPasskeyEntitlement]) return;
+    if (![self passkeysDisabled]) return;
     WKUserContentController *controller = configuration.userContentController ?: [[WKUserContentController alloc] init];
     WKUserScript *script = [[WKUserScript alloc] initWithSource:[self disabledPublicKeyCredentialScript]
                                                   injectionTime:WKUserScriptInjectionTimeAtDocumentStart
@@ -2414,6 +2415,16 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 - (BOOL)keepTabsLoaded {
     id value = [[NSUserDefaults standardUserDefaults] objectForKey:TBKeepTabsLoadedKey];
     return value ? [value boolValue] : YES;
+}
+
+- (BOOL)passkeysDisabled {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:TBPasskeysDisabledKey];
+}
+
+- (void)setPasskeysDisabled:(BOOL)disabled {
+    [[NSUserDefaults standardUserDefaults] setBool:disabled forKey:TBPasskeysDisabledKey];
+    [self setStatusText:disabled ? @"Passkeys disabled" : @"Passkeys enabled"];
+    [self writeBrowserStateRunning:YES];
 }
 
 - (NSInteger)liveTabBudget {
@@ -3109,6 +3120,17 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             [self setKeepTabsLoaded:keepTabsLoaded];
             return YES;
         }
+        if ([key isEqualToString:@"passkeysEnabled"]) {
+            NSString *normalized = value.lowercaseString ?: @"";
+            BOOL enabled = [normalized isEqualToString:@"1"] ||
+                           [normalized isEqualToString:@"true"] ||
+                           [normalized isEqualToString:@"yes"];
+            [self setPasskeysDisabled:!enabled];
+            if (self.webView && [self isSettingsURLString:self.webView.URL.absoluteString]) {
+                [self loadNativeSettingsPageInWebView:self.webView];
+            }
+            return YES;
+        }
         NSDictionary<NSString *, NSString *> *allowed = @{ @"aiEngine": @"TBAIEngine",
                                                            @"codexModel": @"TBCodexModel",
                                                            @"claudeModel": @"TBClaudeModel",
@@ -3157,13 +3179,15 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
     if ([effort isEqualToString:@"minimal"]) effort = @"low";
     NSString *bookmarkBar = self.bookmarkBarVisible ? @"true" : @"false";
     NSString *keepTabsLoaded = [self keepTabsLoaded] ? @"true" : @"false";
+    NSString *passkeysDisabled = [self passkeysDisabled] ? @"true" : @"false";
     NSString *themeMode = TBThemeModeName(TBThemeCurrentMode());
     return [NSString stringWithFormat:
         @"<script>document.documentElement.dataset.theme=\"%@\";"
          "window.__tbThemeMode=\"%@\";window.__tbEngine=\"%@\";window.__tbCodexModel=\"%@\";"
          "window.__tbClaudeModel=\"%@\";window.__tbEffort=\"%@\";"
-         "window.__tbBookmarkBarVisible=%@;window.__tbKeepTabsLoaded=%@;</script></head>",
-        themeMode, themeMode, engine, codexModel, claudeModel, effort, bookmarkBar, keepTabsLoaded];
+         "window.__tbBookmarkBarVisible=%@;window.__tbKeepTabsLoaded=%@;"
+         "window.__tbPasskeysDisabled=%@;</script></head>",
+        themeMode, themeMode, engine, codexModel, claudeModel, effort, bookmarkBar, keepTabsLoaded, passkeysDisabled];
 }
 
 - (void)loadNativeSettingsPageInWebView:(WKWebView *)webView {
@@ -3887,12 +3911,29 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
 
 - (NSDictionary<NSString *, id> *)passkeyStatusDictionary {
     if (@available(macOS 13.3, *)) {
-        if (![self hasBrowserPasskeyEntitlement]) {
+        BOOL disabled = [self passkeysDisabled];
+        BOOL entitled = [self hasBrowserPasskeyEntitlement];
+        if (disabled) {
             return @{
                 @"supported": @YES,
-                @"state": @"needsEntitlement",
-                @"label": @"Needs signed build",
-                @"message": @"This build is not signed with Apple's browser passkey entitlement, so TrailBrowser blocks passkey prompts and asks sites to fall back to password sign-in.",
+                @"state": @"disabled",
+                @"label": @"Disabled",
+                @"message": @"TrailBrowser is blocking website passkey prompts. Turn passkeys on to let sites ask for your fingerprint, face, or screen lock.",
+                @"disabled": @YES,
+                @"entitled": @(entitled),
+                @"canRequest": @NO,
+                @"requestInProgress": @NO
+            };
+        }
+
+        if (!entitled) {
+            return @{
+                @"supported": @YES,
+                @"state": @"limited",
+                @"label": @"Limited",
+                @"message": @"Passkeys are enabled, but this build is not signed with Apple's browser passkey entitlement. WebKit can try site passkey prompts, but full Touch ID access requires an Apple-approved signed build.",
+                @"disabled": @NO,
+                @"entitled": @NO,
                 @"canRequest": @NO,
                 @"requestInProgress": @NO
             };
@@ -3925,6 +3966,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
             @"state": stateKey,
             @"label": label,
             @"message": message,
+            @"disabled": @NO,
+            @"entitled": @YES,
             @"canRequest": @(canRequest && !self.passkeyAccessRequestInProgress),
             @"requestInProgress": @(self.passkeyAccessRequestInProgress)
         };
@@ -3935,6 +3978,8 @@ static void *BrowserCanGoForwardContext = &BrowserCanGoForwardContext;
         @"state": @"unsupported",
         @"label": @"Unsupported",
         @"message": @"Passkeys in browser apps require macOS 13.3 or later.",
+        @"disabled": @NO,
+        @"entitled": @NO,
         @"canRequest": @NO,
         @"requestInProgress": @NO
     };

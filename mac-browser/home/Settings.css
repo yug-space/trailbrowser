@@ -359,10 +359,17 @@ button.danger:hover {
   color: var(--danger);
 }
 
+.status-pill[data-state="limited"],
 .status-pill[data-state="needsEntitlement"] {
   border-color: rgba(236, 107, 91, 0.28);
   background: rgba(236, 107, 91, 0.08);
   color: var(--accent);
+}
+
+.status-pill[data-state="disabled"] {
+  border-color: rgba(98, 93, 106, 0.24);
+  background: rgba(98, 93, 106, 0.08);
+  color: var(--muted);
 }
 
 .history-head {
