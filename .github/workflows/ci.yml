@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-macos:
+    name: Build macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build TrailBrowser.app
+        run: make
+      - name: Confirm binary exists
+        run: test -x TrailBrowser.app/Contents/MacOS/TrailBrowser
+
+  check-mcp:
+    name: Check MCP history server
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        working-directory: mcp-history-server
+        run: npm install
+      - name: Syntax-check server
+        working-directory: mcp-history-server
+        run: node --check server.mjs

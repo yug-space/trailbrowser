@@ -1,0 +1,244 @@
+:root {
+  color-scheme: light;
+  --bg: #f7eef4;
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-hover: rgba(23, 20, 26, 0.055);
+  --text: #17141a;
+  --muted: #625d6a;
+  --faint: #a9a2ae;
+  --line: rgba(30, 24, 38, 0.1);
+  --accent: #ec6b5b;
+  --accent-hover: #de5a4b;
+  --page-bg: linear-gradient(135deg, #f6d9e6 0%, #fbf7fb 46%, #edf0ff 100%);
+  --card-shadow: 0 24px 80px rgba(70, 55, 80, 0.1);
+  --focus-shadow: 0 22px 74px rgba(70, 55, 80, 0.12), 0 0 0 3px rgba(236, 107, 91, 0.14);
+  --control-fill: rgba(23, 20, 26, 0.035);
+  --chip-fill: rgba(255, 255, 255, 0.62);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0a0b;
+  --surface: #161618;
+  --surface-hover: #1f1f23;
+  --text: #f3f3f4;
+  --muted: #8a8a90;
+  --faint: #56565c;
+  --line: rgba(255, 255, 255, 0.09);
+  --page-bg: #0a0a0b;
+  --card-shadow: none;
+  --focus-shadow: 0 0 0 3px rgba(236, 107, 91, 0.18);
+  --control-fill: rgba(255, 255, 255, 0.04);
+  --chip-fill: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--page-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+}
+
+.home {
+  width: min(720px, calc(100vw - 64px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+
+  margin-top: -6vh;
+  animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home {
+    animation: none;
+  }
+}
+
+.wordmark {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  font-size: 64px;
+  font-weight: 300;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.wordmark .mark {
+  width: 84px;
+  height: 84px;
+}
+
+.search-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(24px);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.search-card:focus-within {
+  border-color: rgba(236, 107, 91, 0.68);
+  box-shadow: var(--focus-shadow);
+}
+
+#query {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.5;
+  min-height: 28px;
+  max-height: 240px;
+  padding: 4px 6px 0;
+}
+
+#query::placeholder {
+  color: var(--faint);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--control-fill);
+}
+
+.seg-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.submit svg {
+  width: 18px;
+  height: 18px;
+}
+
+.submit:hover {
+  background: var(--accent-hover);
+}
+
+.submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.suggestions button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--chip-fill);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.suggestions button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+@media (max-width: 620px) {
+  .wordmark {
+    font-size: 44px;
+  }
+
+  .wordmark .mark {
+    width: 64px;
+    height: 64px;
+  }
+}

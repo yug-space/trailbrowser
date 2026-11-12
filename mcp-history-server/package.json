@@ -1,0 +1,17 @@
+{
+  "name": "trailbrowser-history-mcp",
+  "version": "1.0.0",
+  "description": "Read-only MCP server for TrailBrowser browsing history.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "trailbrowser-history-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  }
+}

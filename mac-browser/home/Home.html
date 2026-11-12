@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TrailBrowser</title>
+  <link rel="stylesheet" href="Home.css">
+</head>
+<body>
+  <main class="home">
+    <h1 class="wordmark">
+      <svg class="mark" viewBox="0 0 512 512" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="trail" x1="0.1" y1="1" x2="0.9" y2="0">
+            <stop offset="0" stop-color="#f5aaa2"/>
+            <stop offset="1" stop-color="#ec6b5b"/>
+          </linearGradient>
+          <radialGradient id="summit" cx="0.5" cy="0.4" r="0.6">
+            <stop offset="0" stop-color="#ffd6d1"/>
+            <stop offset="0.55" stop-color="#ec6b5b"/>
+            <stop offset="1" stop-color="#ec6b5b"/>
+          </radialGradient>
+          <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="10" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <path d="M170 392 C250 378 298 330 286 286 C276 246 200 240 192 200 C186 166 248 156 342 132"
+              fill="none" stroke="url(#trail)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="170" cy="392" r="16" fill="none" stroke="url(#trail)" stroke-width="10"/>
+        <circle cx="286" cy="286" r="14" fill="#ec6b5b"/>
+        <circle cx="192" cy="200" r="14" fill="#ec6b5b"/>
+        <circle cx="342" cy="132" r="36" fill="#ec6b5b" opacity="0.22" filter="url(#glow)"/>
+        <circle cx="342" cy="132" r="24" fill="url(#summit)"/>
+      </svg>
+      <span>TrailBrowser</span>
+    </h1>
+
+    <form class="search-card" id="search-form" autocomplete="off">
+      <textarea id="query" rows="1" autofocus spellcheck="false"
+                placeholder="Search the web, paste a URL, or ask anything…"></textarea>
+
+      <div class="toolbar">
+        <span class="spacer"></span>
+
+        <div class="seg" id="mode" role="tablist" aria-label="Search mode">
+          <button type="button" class="seg-btn is-active" data-mode="google" role="tab"
+                  title="Search Google in this tab">Google</button>
+          <button type="button" class="seg-btn" data-mode="ai" role="tab"
+                  title="Generate an AI page for your query. Configure engine, model & speed in Settings.">AI</button>
+        </div>
+
+        <button type="submit" id="submit" class="submit" title="Go" aria-label="Go">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <line x1="8" y1="13" x2="8" y2="3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <polyline points="3.5,7.5 8,3 12.5,7.5" fill="none" stroke="currentColor" stroke-width="1.8"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+
+    <nav class="suggestions" aria-label="Quick links">
+      <button data-open="google.com" type="button">Google</button>
+      <button data-open="youtube.com" type="button">YouTube</button>
+      <button data-open="github.com" type="button">GitHub</button>
+      <button data-open="news.ycombinator.com" type="button">Hacker News</button>
+    </nav>
+  </main>
+
+  <script src="Home.js"></script>
+</body>
+</html>
